@@ -2,14 +2,25 @@ from __future__ import annotations
 
 from flask import Flask, jsonify
 
-from app.config import APP_VERSION, FLASK_DEBUG, FLASK_HOST, FLASK_PORT, OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.config import (
+    APP_VERSION,
+    FLASK_DEBUG,
+    FLASK_HOST,
+    FLASK_PORT,
+    MAX_UPLOAD_BYTES,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+)
 from app.database import init_db, ping_db
+from app.routes.migrations import migrations_bp
 from app.schema import target_schema_summary
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
     init_db()
+    app.register_blueprint(migrations_bp)
 
     @app.get("/health")
     def health():

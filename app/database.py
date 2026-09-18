@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import DATABASE_PATH, UPLOAD_DIR
@@ -12,7 +13,66 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    entity TEXT NOT NULL DEFAULT 'employees',
+    status TEXT NOT NULL DEFAULT 'CREATED',
+    auto_remove_exact_duplicates INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    original_filename TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    format TEXT NOT NULL,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    column_count INTEGER NOT NULL DEFAULT 0,
+    columns_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS source_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file_id INTEGER NOT NULL,
+    source_file TEXT NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE CASCADE,
+    UNIQUE (source_file_id, source_row_number)
+);
+
+CREATE TABLE IF NOT EXISTS normalized_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    employee_id TEXT,
+    payload_json TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING_TRANSFORM',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS record_lineage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_record_id INTEGER NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    source_file TEXT NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    FOREIGN KEY (normalized_record_id) REFERENCES normalized_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_row_id) REFERENCES source_rows(id) ON DELETE CASCADE,
+    UNIQUE (normalized_record_id, source_row_id)
+);
 """
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def ensure_directories() -> None:
