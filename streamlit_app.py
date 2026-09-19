@@ -421,6 +421,29 @@ def render_analysis_review() -> None:
             else:
                 show_api_error(resp, "Validation failed.")
 
+    push_cols = st.columns(3)
+    with push_cols[0]:
+        if st.button("Push ready records"):
+            resp = api_post(f"/api/migrations/{migration['id']}/push")
+            if resp.status_code == 201:
+                st.success(f"Pushed {resp.json().get('records_attempted')} record(s).")
+            else:
+                show_api_error(resp, "Push failed.")
+    with push_cols[1]:
+        if st.button("Retry failed push"):
+            resp = api_post(f"/api/migrations/{migration['id']}/push/retry")
+            if resp.status_code == 201:
+                st.success(f"Retried {resp.json().get('records_attempted')} failed record(s).")
+            else:
+                show_api_error(resp, "Retry failed.")
+    with push_cols[2]:
+        if st.button("Rollback last push"):
+            resp = api_post(f"/api/migrations/{migration['id']}/push/rollback")
+            if resp.status_code == 200:
+                st.warning("Rollback completed for the latest push batch.")
+            else:
+                show_api_error(resp, "Rollback failed.")
+
     queue = api_get(f"/api/migrations/{migration['id']}/review-queue")
     if queue.status_code == 200:
         q = queue.json()
@@ -539,6 +562,15 @@ def render_analysis_review() -> None:
                             show_api_error(resp, "Could not resolve date format.")
                 else:
                     st.write(f"**Chosen format:** {item.get('chosen_format')}")
+
+    audit = api_get(f"/api/migrations/{migration['id']}/audit-log")
+    if audit.status_code == 200 and audit.json().get("entries"):
+        st.subheader("Audit log")
+        for entry in reversed(audit.json()["entries"][-25:]):
+            st.caption(
+                f"{entry['timestamp']} • {entry['actor']} • {entry['action']} • "
+                f"{entry.get('entity') or ''} — {entry.get('reason') or ''}"
+            )
 
 
 if page == PIPELINE_PAGES[0]:

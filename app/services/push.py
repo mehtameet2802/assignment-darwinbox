@@ -4,6 +4,7 @@ import json
 
 from app.database import db_session, utcnow
 from app.services.ingestion import IngestionError, get_migration
+from app.services.audit import HUMAN, SYSTEM, append_audit
 from app.services.mock_target import delete_batch, receive_employee_on_connection
 
 PUSHED = "PUSHED"
@@ -81,6 +82,10 @@ def _push_records(
         )
         batch_id = cursor.lastrowid
         batch_key = str(batch_id)
+        if only_failed:
+            append_audit(connection, migration_id, HUMAN, "retry requested", "push", "Retry failed records")
+        else:
+            append_audit(connection, migration_id, SYSTEM, "push attempted", "batch", batch_key)
 
         rows = connection.execute(
             """
@@ -117,10 +122,26 @@ def _push_records(
                     "UPDATE normalized_records SET status = ? WHERE id = ?",
                     (PUSHED, row["id"]),
                 )
+                append_audit(
+                    connection,
+                    migration_id,
+                    SYSTEM,
+                    "push succeeded",
+                    row["employee_id"],
+                    f"HTTP {http_status}",
+                )
             else:
                 connection.execute(
                     "UPDATE normalized_records SET status = ? WHERE id = ?",
                     (PUSH_FAILED, row["id"]),
+                )
+                append_audit(
+                    connection,
+                    migration_id,
+                    SYSTEM,
+                    "push failed",
+                    row["employee_id"],
+                    error_message or body.get("error") or f"HTTP {http_status}",
                 )
             results.append(
                 {
@@ -175,6 +196,7 @@ def rollback_latest_push(migration_id: int) -> dict:
             raise IngestionError("No completed push batch to rollback.", 404)
 
         batch_key = str(batch["id"])
+        append_audit(connection, migration_id, HUMAN, "rollback requested", batch_key, "Rollback latest push batch")
         success_rows = connection.execute(
             """
             SELECT employee_id FROM push_attempts
@@ -199,6 +221,14 @@ def rollback_latest_push(migration_id: int) -> dict:
         connection.execute(
             "UPDATE push_batches SET status = ?, rolled_back_at = ? WHERE id = ?",
             (ROLLED_BACK, utcnow(), batch["id"]),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            SYSTEM,
+            "rollback completed",
+            batch_key,
+            f"Removed {deleted['deleted_count']} target records",
         )
 
     return {

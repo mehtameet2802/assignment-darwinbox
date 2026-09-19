@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
+from app.services.audit import list_audit_log
 from app.services.ingestion import (
     IngestionError,
     attach_lineage,
@@ -96,6 +97,14 @@ def preview(migration_id: int, source_file_id: int):
 def delete_file(migration_id: int, source_file_id: int):
     try:
         return jsonify(delete_source_file(migration_id, source_file_id))
+    except IngestionError as exc:
+        return _error(exc)
+
+
+@migrations_bp.get("/api/migrations/<int:migration_id>/audit-log")
+def audit_log(migration_id: int):
+    try:
+        return jsonify(list_audit_log(migration_id))
     except IngestionError as exc:
         return _error(exc)
 

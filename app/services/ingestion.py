@@ -55,6 +55,9 @@ def create_migration(name: str = "Employee Migration") -> dict:
             (name, utcnow()),
         )
         migration_id = cursor.lastrowid
+        from app.services.audit import AGENT, append_audit
+
+        append_audit(connection, migration_id, AGENT, "migration created", name, "New migration session")
     return get_migration(migration_id)
 
 
@@ -185,6 +188,16 @@ def ingest_bytes(migration_id: int, filename: str, content: bytes) -> dict:
             connection.execute(
                 "UPDATE migrations SET status = 'FILES_STAGED' WHERE id = ?",
                 (migration_id,),
+            )
+            from app.services.audit import SYSTEM, append_audit
+
+            append_audit(
+                connection,
+                migration_id,
+                SYSTEM,
+                "file uploaded",
+                original,
+                f"{len(frame)} rows staged",
             )
         return {
             "id": source_file_id,

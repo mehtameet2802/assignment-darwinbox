@@ -89,6 +89,16 @@ def validate_migration(migration_id: int) -> dict:
                 "UPDATE normalized_records SET status = ? WHERE id = ?",
                 (NEEDS_REVIEW, row["id"]),
             )
+            from app.services.audit import SYSTEM, append_audit
+
+            append_audit(
+                connection,
+                migration_id,
+                SYSTEM,
+                "validation escalation created",
+                row["employee_id"],
+                result["review_reason"],
+            )
             connection.execute(
                 """
                 INSERT INTO validation_escalations (
@@ -194,7 +204,17 @@ def resolve_validation_escalation(
             raise IngestionError("Validation escalation not found.", 404)
 
         record_id = row["normalized_record_id"]
+        from app.services.audit import HUMAN, append_audit
+
         if action == "exclude":
+            append_audit(
+                connection,
+                migration_id,
+                HUMAN,
+                "record excluded",
+                row["employee_id"],
+                "Validation escalation excluded",
+            )
             connection.execute(
                 "UPDATE normalized_records SET status = ? WHERE id = ?",
                 (EXCLUDED, record_id),
@@ -244,6 +264,14 @@ def resolve_validation_escalation(
         connection.execute(
             "UPDATE validation_escalations SET status = ?, current_payload_json = ?, updated_at = ? WHERE id = ?",
             (RESOLVED, json.dumps(payload), utcnow(), escalation_id),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            HUMAN,
+            "human correction",
+            row["employee_id"],
+            f"Set {field_name} during validation review",
         )
 
     return list_validation_escalations(migration_id)

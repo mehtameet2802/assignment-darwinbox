@@ -86,6 +86,16 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
             "UPDATE migrations SET status = 'MAPPINGS_GENERATED' WHERE id = ?",
             (migration_id,),
         )
+        from app.services.audit import AGENT, append_audit
+
+        append_audit(
+            connection,
+            migration_id,
+            AGENT,
+            "mapping generated",
+            "employees",
+            f"{len(analysis['columns'])} source columns analyzed",
+        )
     return list_mappings(migration_id)
 
 
