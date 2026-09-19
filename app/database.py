@@ -163,6 +163,17 @@ CREATE TABLE IF NOT EXISTS push_batches (
     FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER,
+    timestamp TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity TEXT,
+    reason TEXT,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS push_attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     push_batch_id INTEGER NOT NULL,
