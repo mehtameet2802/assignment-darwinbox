@@ -231,6 +231,10 @@ def delete_source_file(migration_id: int, source_file_id: int) -> dict:
             raise AppError("Source file was not found for this migration.", 404)
         stored_path = Path(source_file["stored_path"])
         connection.execute("DELETE FROM source_rows WHERE source_file_id = ?", (source_file_id,))
+        connection.execute(
+            "DELETE FROM column_mappings WHERE migration_id = ? AND source_file_id = ?",
+            (migration_id, source_file_id),
+        )
         connection.execute("DELETE FROM source_files WHERE id = ?", (source_file_id,))
         remaining = connection.execute(
             "SELECT COUNT(*) AS n FROM source_files WHERE migration_id = ?",

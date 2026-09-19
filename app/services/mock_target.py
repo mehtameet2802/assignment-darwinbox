@@ -85,3 +85,36 @@ def list_batch_records(batch_id: str) -> list[dict[str, Any]]:
             (batch_id,),
         ).fetchall()
     return [{"employee_id": row["employee_id"]} for row in rows]
+
+
+def list_target_records_for_migration(migration_id: int) -> list[dict[str, Any]]:
+    with db_session() as connection:
+        rows = connection.execute(
+            """
+            SELECT mtr.employee_id, mtr.batch_id, mtr.payload_json, mtr.created_at,
+                   nr.status AS migration_record_status
+            FROM mock_target_records mtr
+            INNER JOIN push_batches pb ON pb.id = CAST(mtr.batch_id AS INTEGER)
+            LEFT JOIN normalized_records nr
+                ON nr.migration_id = pb.migration_id AND nr.employee_id = mtr.employee_id
+            WHERE pb.migration_id = ?
+            ORDER BY mtr.employee_id
+            """,
+            (migration_id,),
+        ).fetchall()
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        payload = json.loads(row["payload_json"] or "{}")
+        records.append(
+            {
+                "employee_id": row["employee_id"],
+                "batch_id": row["batch_id"],
+                "name": payload.get("name") or payload.get("full_name") or "—",
+                "email": payload.get("email") or "—",
+                "department": payload.get("department") or "—",
+                "migration_record_status": row["migration_record_status"],
+                "created_at": row["created_at"],
+                "payload": payload,
+            }
+        )
+    return records

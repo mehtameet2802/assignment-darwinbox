@@ -5,6 +5,7 @@ import json
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.services.audit import HUMAN, append_audit
+from app.services.date_format_llm import AUTO_RESOLVE_CONFIDENCE, suggest_date_format
 from app.services.dates import FORMAT_DMY, FORMAT_MDY, analyze_date_column
 from app.services.mapping_store import list_mappings_from_connection
 from app.services.migrations import require_migration
@@ -23,6 +24,10 @@ def _row_to_escalation(row) -> dict:
         "chosen_format": row["chosen_format"],
         "sample_values": json.loads(row["sample_values_json"]),
         "review_reason": row["review_reason"],
+        "suggested_format": row["suggested_format"] if "suggested_format" in row.keys() else None,
+        "suggestion_confidence": row["suggestion_confidence"]
+        if "suggestion_confidence" in row.keys()
+        else None,
         "updated_at": row["updated_at"],
     }
 
@@ -68,14 +73,38 @@ def scan_date_columns(migration_id: int) -> dict:
             status = NEEDS_REVIEW if analysis["ambiguous"] else RESOLVED
             chosen = analysis["chosen_format"]
             issue_type = analysis["issue_type"] or "AUTO_RESOLVED"
+            suggested_format = None
+            suggestion_confidence = None
+            review_reason = analysis["review_reason"]
+
+            if analysis["ambiguous"]:
+                suggestion = suggest_date_format(
+                    mapping["source_column"],
+                    mapping["source_file"],
+                    analysis["sample_values"],
+                )
+                suggested_format = suggestion.get("suggested_format")
+                suggestion_confidence = suggestion.get("confidence")
+                if (
+                    suggested_format
+                    and suggestion_confidence is not None
+                    and suggestion_confidence >= AUTO_RESOLVE_CONFIDENCE
+                ):
+                    status = RESOLVED
+                    chosen = suggested_format
+                    issue_type = "OLLAMA_AUTO_RESOLVED"
+                    review_reason = suggestion.get("reason") or f"Ollama auto-selected {chosen}."
+                elif suggestion.get("reason"):
+                    review_reason = suggestion["reason"]
+
             connection.execute(
                 """
                 INSERT INTO date_column_escalations (
                     migration_id, source_file_id, source_file, source_column,
                     issue_type, status, chosen_format, sample_values_json,
-                    review_reason, updated_at
+                    review_reason, suggested_format, suggestion_confidence, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(migration_id, source_file_id, source_column)
                 DO UPDATE SET
                     issue_type = excluded.issue_type,
@@ -83,6 +112,8 @@ def scan_date_columns(migration_id: int) -> dict:
                     chosen_format = excluded.chosen_format,
                     sample_values_json = excluded.sample_values_json,
                     review_reason = excluded.review_reason,
+                    suggested_format = excluded.suggested_format,
+                    suggestion_confidence = excluded.suggestion_confidence,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -94,7 +125,9 @@ def scan_date_columns(migration_id: int) -> dict:
                     status,
                     chosen,
                     json.dumps(analysis["sample_values"]),
-                    analysis["review_reason"],
+                    review_reason,
+                    suggested_format,
+                    suggestion_confidence,
                     now,
                 ),
             )

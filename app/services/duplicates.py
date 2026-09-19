@@ -12,6 +12,22 @@ from app.status import EXACT_DEDUPED, EXCLUDED, NEEDS_REVIEW, RESOLVED, TRANSFOR
 DUPLICATE_CONFLICT = "DUPLICATE_CONFLICT"
 
 
+def open_duplicate_conflict_record_ids(connection, migration_id: int) -> set[int]:
+    """Normalized record ids still tied to an unresolved duplicate conflict."""
+    rows = connection.execute(
+        """
+        SELECT members_json FROM duplicate_conflicts
+        WHERE migration_id = ? AND status = ?
+        """,
+        (migration_id, NEEDS_REVIEW),
+    ).fetchall()
+    record_ids: set[int] = set()
+    for row in rows:
+        for member in json.loads(row["members_json"] or "[]"):
+            record_ids.add(int(member["normalized_record_id"]))
+    return record_ids
+
+
 def _payload_key(payload: dict) -> str:
     return json.dumps(payload, sort_keys=True, default=str)
 

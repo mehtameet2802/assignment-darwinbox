@@ -8,7 +8,7 @@ from flask_app import create_app
 
 from app.database import init_db
 from app.services.mock_target import list_batch_records
-from app.services.push import READY_TO_PUSH
+from app.status import READY_TO_PUSH
 from tests.test_duplicates import _ollama_side_effect
 
 
@@ -91,3 +91,19 @@ def test_rollback_removes_target_batch_records(client) -> None:
             (migration_id, before[0]["employee_id"]),
         ).fetchone()
     assert row["status"] == READY_TO_PUSH
+
+
+def test_push_overview_separates_failed_and_history(client) -> None:
+    created = client.post("/api/migrations", json={"name": "Overview"})
+    migration_id = created.get_json()["id"]
+    client.post(f"/api/migrations/{migration_id}/demo-files")
+    _prepare_ready_records(client, migration_id)
+
+    client.post(f"/api/migrations/{migration_id}/push")
+    overview = client.get(f"/api/migrations/{migration_id}/push/overview").get_json()
+    assert overview["record_counts"]["push_failed"] >= 1
+    assert overview["failed_records"]
+    assert overview["latest_operation"]["operation"] == "push"
+    history = overview["attempt_history"]
+    assert history[0]["operation_label"] == "Push"
+    assert "batch_status" not in history[0]

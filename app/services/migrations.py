@@ -40,6 +40,7 @@ def _file_payload(source_file: sqlite3.Row) -> dict:
 
 def _serialize_migration(migration: sqlite3.Row, files: list[sqlite3.Row]) -> dict:
     file_payloads = [_file_payload(source_file) for source_file in files]
+    keys = set(migration.keys())
     return {
         "id": migration["id"],
         "name": migration["name"],
@@ -47,6 +48,7 @@ def _serialize_migration(migration: sqlite3.Row, files: list[sqlite3.Row]) -> di
         "status": migration["status"],
         "auto_remove_exact_duplicates": bool(migration["auto_remove_exact_duplicates"]),
         "created_at": migration["created_at"],
+        "completed_at": migration["completed_at"] if "completed_at" in keys else None,
         "files": file_payloads,
         "file_count": len(file_payloads),
         "total_source_rows": sum(item["row_count"] for item in file_payloads),

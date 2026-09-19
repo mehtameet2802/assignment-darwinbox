@@ -8,7 +8,7 @@ from app.schema import EMPLOYEE_TARGET_SCHEMA
 from app.services.audit import AGENT, HUMAN, append_audit
 from app.services.mapping_policy import evaluate_mapping_policy
 from app.services.migrations import require_migration
-from app.services.source_analysis import analyze_migration
+from app.services.source_analysis import _summarize_columns, analyze_migration
 
 TARGET_FIELD_NAMES = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
 
@@ -90,7 +90,13 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
             "employees",
             f"{len(analysis['columns'])} source columns analyzed",
         )
-    return list_mappings(migration_id)
+    result = list_mappings(migration_id)
+    summary = _summarize_columns(analysis["columns"], include_semantic)
+    result["generation_summary"] = {
+        **summary,
+        "strategy": "ollama_then_alias_fallback" if include_semantic else "alias_only",
+    }
+    return result
 
 
 def list_mappings_from_connection(connection, migration_id: int) -> dict:

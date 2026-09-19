@@ -10,6 +10,7 @@ from app.errors import AppError
 from app.models.employee import EmployeeRecord
 from app.schema import EMPLOYEE_TARGET_SCHEMA
 from app.services.audit import HUMAN, SYSTEM, append_audit
+from app.services.duplicates import open_duplicate_conflict_record_ids
 from app.services.migrations import require_migration
 from app.status import EXCLUDED, NEEDS_REVIEW, READY_TO_PUSH, RESOLVED, TRANSFORMED
 
@@ -61,17 +62,20 @@ def validate_migration(migration_id: int) -> dict:
             "DELETE FROM validation_escalations WHERE migration_id = ?",
             (migration_id,),
         )
+        skip_record_ids = open_duplicate_conflict_record_ids(connection, migration_id)
         rows = connection.execute(
             """
             SELECT id, employee_id, payload_json, status
             FROM normalized_records
-            WHERE migration_id = ? AND status = ?
+            WHERE migration_id = ? AND status IN (?, ?)
             ORDER BY id
             """,
-            (migration_id, TRANSFORMED),
+            (migration_id, TRANSFORMED, NEEDS_REVIEW),
         ).fetchall()
 
         for row in rows:
+            if row["id"] in skip_record_ids:
+                continue
             payload = json.loads(row["payload_json"] or "{}")
             result = assess_record(payload)
             validated += 1

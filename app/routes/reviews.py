@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
+from app.errors import AppError
+from app.services.analysis_pipeline import (
+    build_analysis_snapshot,
+    continue_after_date_resolution,
+    continue_after_duplicate_resolution,
+    continue_after_validation_resolution,
+    run_analysis_pipeline,
+)
 from app.services.cleaning import clean_for_target_field
 from app.services.date_escalations import (
     list_date_escalations,
@@ -16,6 +24,44 @@ from app.services.validation import (
 )
 
 reviews_bp = Blueprint("reviews", __name__)
+
+
+def _error(exc: AppError):
+    return jsonify({"error": exc.message}), exc.status_code
+
+
+@reviews_bp.post("/api/migrations/<int:migration_id>/analysis/run")
+def run_analysis(migration_id: int):
+    try:
+        return jsonify(run_analysis_pipeline(migration_id)), 201
+    except AppError as exc:
+        return _error(exc)
+
+
+@reviews_bp.get("/api/migrations/<int:migration_id>/analysis/snapshot")
+def analysis_snapshot(migration_id: int):
+    try:
+        return jsonify(build_analysis_snapshot(migration_id))
+    except AppError as exc:
+        return _error(exc)
+
+
+@reviews_bp.post("/api/migrations/<int:migration_id>/analysis/continue")
+def continue_analysis(migration_id: int):
+    payload = request.get_json(silent=True) or {}
+    after = payload.get("after") or "date"
+    try:
+        if after == "date":
+            result = continue_after_date_resolution(migration_id)
+        elif after == "duplicate":
+            result = continue_after_duplicate_resolution(migration_id)
+        elif after == "validation":
+            result = continue_after_validation_resolution(migration_id)
+        else:
+            return jsonify({"error": "after must be date, duplicate, or validation."}), 400
+        return jsonify(result), 201
+    except AppError as exc:
+        return _error(exc)
 
 
 @reviews_bp.post("/api/clean/preview")

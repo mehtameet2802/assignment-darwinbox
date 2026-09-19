@@ -118,3 +118,37 @@ def test_source_analysis_semantic_uses_mocked_ollama(client) -> None:
     assert date_col["proposed_target"] == "joining_date"
     assert date_col["mapping_method"] == "ollama"
     assert payload["semantic_mappings"] >= 1
+
+
+def test_source_analysis_ollama_failure_falls_back_to_alias(client) -> None:
+    created = client.post("/api/migrations", json={"name": "Fallback"})
+    migration_id = created.get_json()["id"]
+    client.post(f"/api/migrations/{migration_id}/demo-files")
+
+    mock_client = MagicMock()
+    mock_client.infer_mapping.return_value = {
+        "source_column": "Emp Code",
+        "source_type": "string_like",
+        "target_field": None,
+        "confidence": None,
+        "reason": "Ollama request failed: connection refused",
+        "alternatives": [],
+        "method": "ollama_failed",
+        "success": False,
+    }
+
+    with patch("app.services.source_analysis.LLMClient", return_value=mock_client):
+        response = client.get(
+            f"/api/migrations/{migration_id}/source-analysis?include_semantic=true"
+        )
+    assert response.status_code == 200
+    payload = response.get_json()
+    emp = next(
+        c
+        for c in payload["columns"]
+        if c["source_column"] == "Emp Code" and c["source_file"] == "employees_legacy.csv"
+    )
+    assert emp["proposed_target"] == "employee_id"
+    assert emp["mapping_method"] == "deterministic_alias"
+    assert emp.get("fallback_used") is True
+    assert payload["alias_fallback_mappings"] >= 1
