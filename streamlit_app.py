@@ -236,17 +236,37 @@ def render_new_migration() -> None:
         st.rerun()
 
     if migration["file_count"] > 0:
-        if st.button("Run deterministic column analysis"):
+        col_det, col_sem = st.columns(2)
+        with col_det:
+            run_det = st.button("Run deterministic column analysis")
+        with col_sem:
+            run_sem = st.button("Run Ollama semantic mapping")
+        if run_det:
             analysis = api_get(f"/api/migrations/{migration['id']}/source-analysis")
             if analysis.status_code == 200:
                 st.session_state[f"analysis_{migration['id']}"] = analysis.json()
             else:
                 show_api_error(analysis, "Column analysis failed.")
+        if run_sem:
+            analysis = api_get(
+                f"/api/migrations/{migration['id']}/source-analysis?include_semantic=true",
+                timeout=120,
+            )
+            if analysis.status_code == 200:
+                st.session_state[f"analysis_{migration['id']}"] = analysis.json()
+            else:
+                show_api_error(analysis, "Ollama semantic mapping failed.")
         analysis_payload = st.session_state.get(f"analysis_{migration['id']}")
         if analysis_payload:
+            semantic_note = (
+                f", {analysis_payload.get('semantic_mappings', 0)} via Ollama"
+                if analysis_payload.get("include_semantic")
+                else ""
+            )
             st.markdown(
-                f"**Deterministic analysis** — {analysis_payload['deterministic_mappings']} / "
-                f"{analysis_payload['column_count']} columns mapped via aliases"
+                f"**Column analysis** — {analysis_payload.get('mapped_columns', 0)} / "
+                f"{analysis_payload['column_count']} mapped "
+                f"({analysis_payload['deterministic_mappings']} alias{semantic_note})"
             )
             analysis_rows = [
                 {
@@ -254,14 +274,15 @@ def render_new_migration() -> None:
                     "Source column": item["source_column"],
                     "Detected type": item["detected_source_type"],
                     "Proposed target": item["proposed_target"] or "—",
+                    "Method": item["mapping_method"] or "—",
+                    "Confidence": item["confidence"] if item["confidence"] is not None else "—",
                     "Samples": ", ".join(item["sample_values"][:3]),
                 }
                 for item in analysis_payload["columns"]
             ]
             st.dataframe(analysis_rows, hide_index=True, width="stretch")
 
-    st.button("Start AI semantic matching", disabled=True)
-    st.caption("Ollama semantic mapping and review policy arrive in Phases 4–5.")
+    st.caption("Review policy (0.85 threshold + structural checks) is Phase 5.")
     with start_later:
         st.caption(f"Status: {migration['status']}")
 

@@ -15,7 +15,18 @@ def _error(exc: IngestionError):
 @mappings_bp.get("/api/migrations/<int:migration_id>/source-analysis")
 def source_analysis(migration_id: int):
     sample_limit = request.args.get("sample_limit", default=8, type=int)
+    include_semantic = request.args.get("include_semantic", default="false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     try:
-        return jsonify(analyze_migration(migration_id, sample_limit=sample_limit))
+        return jsonify(
+            analyze_migration(
+                migration_id,
+                sample_limit=sample_limit,
+                include_semantic=include_semantic,
+            )
+        )
     except IngestionError as exc:
         return _error(exc)
