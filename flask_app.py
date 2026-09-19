@@ -14,6 +14,7 @@ from app.config import (
 from app.database import init_db, ping_db
 from app.routes.duplicates import duplicates_bp
 from app.routes.mock_target import mock_target_bp
+from app.routes.pushes import pushes_bp
 from app.routes.mappings import mappings_bp
 from app.routes.migrations import migrations_bp
 from app.routes.reviews import reviews_bp
@@ -29,6 +30,7 @@ def create_app() -> Flask:
     app.register_blueprint(reviews_bp)
     app.register_blueprint(duplicates_bp)
     app.register_blueprint(mock_target_bp)
+    app.register_blueprint(pushes_bp)
 
     @app.get("/health")
     def health():

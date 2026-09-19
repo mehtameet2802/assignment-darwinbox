@@ -153,6 +153,33 @@ CREATE TABLE IF NOT EXISTS mock_target_e009_state (
     employee_id TEXT PRIMARY KEY,
     push_count INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS push_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS push_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    push_batch_id INTEGER NOT NULL,
+    migration_id INTEGER NOT NULL,
+    normalized_record_id INTEGER NOT NULL,
+    employee_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    method TEXT NOT NULL,
+    http_status INTEGER,
+    result TEXT NOT NULL,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (push_batch_id) REFERENCES push_batches(id) ON DELETE CASCADE,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
+    FOREIGN KEY (normalized_record_id) REFERENCES normalized_records(id) ON DELETE CASCADE
+);
 """
 
 
