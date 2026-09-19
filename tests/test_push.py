@@ -4,12 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
 from app.services.mock_target import list_batch_records
 from app.services.push import READY_TO_PUSH
-from flask_app import create_app
-from tests.test_duplicates import _ollama_side_effect, _run_demo_pipeline
+from tests.test_duplicates import _ollama_side_effect
 
 
 @pytest.fixture

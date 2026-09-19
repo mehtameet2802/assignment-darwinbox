@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 
 from app.database import db_session
-from app.services.ingestion import IngestionError, get_migration
+from app.errors import AppError
 from app.services.llm_client import LLMClient
 from app.services.mapping import deterministic_mapping
+from app.services.migrations import get_migration, require_migration
 from app.services.type_inference import infer_column_type
 
 DEFAULT_SAMPLE_LIMIT = 8
@@ -55,7 +56,7 @@ def collect_column_samples(
     include_semantic: bool = False,
     llm_client: LLMClient | None = None,
 ) -> list[dict]:
-    get_migration(migration_id)
+    require_migration(migration_id)
     columns: list[dict] = []
     with db_session() as connection:
         files = connection.execute(
@@ -113,7 +114,7 @@ def analyze_migration(
 ) -> dict:
     migration = get_migration(migration_id)
     if migration["file_count"] == 0:
-        raise IngestionError("Upload at least one source file before running analysis.", 400)
+        raise AppError("Upload at least one source file before running analysis.", 400)
     columns = collect_column_samples(
         migration_id,
         sample_limit=sample_limit,

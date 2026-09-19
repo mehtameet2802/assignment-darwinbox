@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 
 from app.database import db_session, utcnow
+from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
 from app.services.cleaning import clean_for_target_field, target_field_type
 from app.services.date_escalations import list_date_escalations
-from app.services.ingestion import IngestionError, get_migration
 from app.services.mapping_store import list_mappings
+from app.services.migrations import require_migration
+from app.status import TRANSFORMED
 
 TARGET_FIELDS = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
 
@@ -22,13 +24,12 @@ def _date_format_lookup(migration_id: int) -> dict[tuple[int, str], str]:
 
 
 def transform_migration(migration_id: int) -> dict:
-    migration = get_migration(migration_id)
     mappings_payload = list_mappings(migration_id)
     if mappings_payload["blocking_review_count"] > 0:
-        raise IngestionError("Resolve all mapping reviews before transforming.", 400)
+        raise AppError("Resolve all mapping reviews before transforming.", 400)
     dates_payload = list_date_escalations(migration_id)
     if dates_payload["blocking_count"] > 0:
-        raise IngestionError("Resolve all date-format escalations before transforming.", 400)
+        raise AppError("Resolve all date-format escalations before transforming.", 400)
 
     active_mappings = [
         m for m in mappings_payload["mappings"] if not m["ignored"] and m["final_target"]
@@ -38,6 +39,7 @@ def transform_migration(migration_id: int) -> dict:
     now = utcnow()
 
     with db_session() as connection:
+        require_migration(migration_id, connection)
         connection.execute(
             """
             DELETE FROM record_lineage
@@ -86,12 +88,13 @@ def transform_migration(migration_id: int) -> dict:
             cursor = connection.execute(
                 """
                 INSERT INTO normalized_records (migration_id, employee_id, payload_json, status, created_at)
-                VALUES (?, ?, ?, 'TRANSFORMED', ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     migration_id,
                     normalized.get("employee_id"),
                     json.dumps(normalized),
+                    TRANSFORMED,
                     now,
                 ),
             )
@@ -108,8 +111,8 @@ def transform_migration(migration_id: int) -> dict:
             created += 1
 
         connection.execute(
-            "UPDATE migrations SET status = 'TRANSFORMED' WHERE id = ?",
-            (migration_id,),
+            "UPDATE migrations SET status = ? WHERE id = ?",
+            (TRANSFORMED, migration_id),
         )
 
     return {"migration_id": migration_id, "records_created": created}

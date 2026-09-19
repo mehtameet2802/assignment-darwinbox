@@ -563,10 +563,12 @@ def render_analysis_review() -> None:
                 else:
                     st.write(f"**Chosen format:** {item.get('chosen_format')}")
 
-    audit = api_get(f"/api/migrations/{migration['id']}/audit-log")
+    audit = api_get(
+        f"/api/migrations/{migration['id']}/audit-log?limit=25&offset=0"
+    )
     if audit.status_code == 200 and audit.json().get("entries"):
-        st.subheader("Audit log")
-        for entry in reversed(audit.json()["entries"][-25:]):
+        st.subheader("Audit log (latest 25)")
+        for entry in audit.json()["entries"]:
             st.caption(
                 f"{entry['timestamp']} • {entry['actor']} • {entry['action']} • "
                 f"{entry.get('entity') or ''} — {entry.get('reason') or ''}"

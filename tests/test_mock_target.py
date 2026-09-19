@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
-from flask_app import create_app
 
 E009_PAYLOAD = {
     "employee_id": "E009",

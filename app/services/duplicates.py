@@ -4,13 +4,12 @@ import json
 from collections import defaultdict
 
 from app.database import db_session, utcnow
-from app.services.ingestion import IngestionError, get_migration
+from app.errors import AppError
+from app.services.audit import HUMAN, append_audit
+from app.services.migrations import get_migration, require_migration
+from app.status import EXACT_DEDUPED, EXCLUDED, NEEDS_REVIEW, RESOLVED, TRANSFORMED
 
-EXACT_DEDUPED = "EXACT_DEDUPED"
 DUPLICATE_CONFLICT = "DUPLICATE_CONFLICT"
-NEEDS_REVIEW = "NEEDS_REVIEW"
-RESOLVED = "RESOLVED"
-EXCLUDED = "EXCLUDED"
 
 
 def _payload_key(payload: dict) -> str:
@@ -23,10 +22,10 @@ def _load_records(migration_id: int) -> list[dict]:
             """
             SELECT id, employee_id, payload_json, status
             FROM normalized_records
-            WHERE migration_id = ? AND status IN ('TRANSFORMED', 'NEEDS_REVIEW')
+            WHERE migration_id = ? AND status IN (?, ?)
             ORDER BY id
             """,
-            (migration_id,),
+            (migration_id, TRANSFORMED, NEEDS_REVIEW),
         ).fetchall()
     records = []
     for row in rows:
@@ -180,17 +179,15 @@ def analyze_duplicates(migration_id: int) -> dict:
     }
 
 
-def list_duplicate_conflicts(migration_id: int) -> dict:
-    get_migration(migration_id)
-    with db_session() as connection:
-        rows = connection.execute(
-            """
-            SELECT * FROM duplicate_conflicts
-            WHERE migration_id = ?
-            ORDER BY employee_id
-            """,
-            (migration_id,),
-        ).fetchall()
+def list_duplicate_conflicts_from_connection(connection, migration_id: int) -> dict:
+    rows = connection.execute(
+        """
+        SELECT * FROM duplicate_conflicts
+        WHERE migration_id = ?
+        ORDER BY employee_id
+        """,
+        (migration_id,),
+    ).fetchall()
     conflicts = []
     for row in rows:
         conflicts.append(
@@ -214,8 +211,15 @@ def list_duplicate_conflicts(migration_id: int) -> dict:
     }
 
 
+def list_duplicate_conflicts(migration_id: int) -> dict:
+    with db_session() as connection:
+        require_migration(migration_id, connection)
+        return list_duplicate_conflicts_from_connection(connection, migration_id)
+
+
 def get_record_lineage_summary(migration_id: int, employee_id: str) -> dict:
     with db_session() as connection:
+        require_migration(migration_id, connection)
         row = connection.execute(
             """
             SELECT id, payload_json, status
@@ -227,7 +231,7 @@ def get_record_lineage_summary(migration_id: int, employee_id: str) -> dict:
             (migration_id, employee_id),
         ).fetchone()
         if row is None:
-            raise IngestionError(f"No active record found for {employee_id}.", 404)
+            raise AppError(f"No active record found for {employee_id}.", 404)
         lineage = _lineage_for_record(connection, row["id"])
     return {
         "employee_id": employee_id,
@@ -246,7 +250,7 @@ def resolve_duplicate_conflict(
     final_payload: dict | None = None,
 ) -> dict:
     if action not in {"save", "exclude"}:
-        raise IngestionError("action must be 'save' or 'exclude'.", 400)
+        raise AppError("action must be 'save' or 'exclude'.", 400)
 
     with db_session() as connection:
         conflict = connection.execute(
@@ -257,7 +261,7 @@ def resolve_duplicate_conflict(
             (conflict_id, migration_id),
         ).fetchone()
         if conflict is None:
-            raise IngestionError("Duplicate conflict not found.", 404)
+            raise AppError("Duplicate conflict not found.", 404)
 
         members = json.loads(conflict["members_json"])
         member_ids = [m["normalized_record_id"] for m in members]
@@ -276,10 +280,18 @@ def resolve_duplicate_conflict(
                 """,
                 (EXCLUDED, utcnow(), conflict_id),
             )
+            append_audit(
+                connection,
+                migration_id,
+                HUMAN,
+                "record excluded",
+                conflict["employee_id"],
+                "Duplicate conflict excluded",
+            )
             return list_duplicate_conflicts(migration_id)
 
         if not final_payload:
-            raise IngestionError("final_payload is required when action is save.", 400)
+            raise AppError("final_payload is required when action is save.", 400)
 
         keeper_id = member_ids[0]
         for record_id in member_ids[1:]:
@@ -291,10 +303,10 @@ def resolve_duplicate_conflict(
         connection.execute(
             """
             UPDATE normalized_records
-            SET payload_json = ?, status = 'TRANSFORMED', employee_id = ?
+            SET payload_json = ?, status = ?, employee_id = ?
             WHERE id = ?
             """,
-            (json.dumps(final_payload), final_payload.get("employee_id"), keeper_id),
+            (json.dumps(final_payload), TRANSFORMED, final_payload.get("employee_id"), keeper_id),
         )
         connection.execute(
             """
@@ -303,6 +315,14 @@ def resolve_duplicate_conflict(
             WHERE id = ?
             """,
             (RESOLVED, json.dumps(final_payload), utcnow(), conflict_id),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            HUMAN,
+            "human correction",
+            conflict["employee_id"],
+            f"Resolved duplicate conflict for {conflict['employee_id']}",
         )
 
     return list_duplicate_conflicts(migration_id)

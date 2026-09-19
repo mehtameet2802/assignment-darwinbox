@@ -8,17 +8,13 @@ import pandas as pd
 
 from app.config import DEMO_DIR, UPLOAD_DIR
 from app.database import db_session, utcnow
+from app.errors import AppError
+from app.services.audit import SYSTEM, append_audit
+from app.services.migrations import get_migration, require_migration
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
 HEADER_ROW_NUMBER = 1
 FIRST_DATA_ROW_NUMBER = 2
-
-
-class IngestionError(Exception):
-    def __init__(self, message: str, status_code: int = 400):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
 
 
 def _extension(filename: str) -> str:
@@ -40,101 +36,17 @@ def _read_table(path: Path, filename: str) -> pd.DataFrame:
         return pd.read_csv(path, dtype=str, keep_default_na=False)
     if ext == ".xlsx":
         return pd.read_excel(path, dtype=str, keep_default_na=False, engine="openpyxl")
-    raise IngestionError(
+    raise AppError(
         f"Unsupported file format '{ext or filename}'. Upload .csv or .xlsx only."
     )
 
 
-def create_migration(name: str = "Employee Migration") -> dict:
-    with db_session() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO migrations (name, entity, status, auto_remove_exact_duplicates, created_at)
-            VALUES (?, 'employees', 'CREATED', 1, ?)
-            """,
-            (name, utcnow()),
-        )
-        migration_id = cursor.lastrowid
-        from app.services.audit import AGENT, append_audit
-
-        append_audit(connection, migration_id, AGENT, "migration created", name, "New migration session")
-    return get_migration(migration_id)
-
-
-def list_migrations() -> list[dict]:
-    with db_session() as connection:
-        rows = connection.execute(
-            "SELECT * FROM migrations ORDER BY id DESC"
-        ).fetchall()
-    return [get_migration(row["id"]) for row in rows]
-
-
-def get_migration(migration_id: int) -> dict:
-    with db_session() as connection:
-        migration = connection.execute(
-            "SELECT * FROM migrations WHERE id = ?",
-            (migration_id,),
-        ).fetchone()
-        if migration is None:
-            raise IngestionError(f"Migration {migration_id} was not found.", 404)
-        files = connection.execute(
-            """
-            SELECT id, original_filename, format, row_count, column_count,
-                   columns_json, status, error_message, created_at
-            FROM source_files
-            WHERE migration_id = ?
-            ORDER BY id
-            """,
-            (migration_id,),
-        ).fetchall()
-    file_payloads = []
-    total_rows = 0
-    for source_file in files:
-        columns = json.loads(source_file["columns_json"])
-        row_count = source_file["row_count"]
-        total_rows += row_count
-        file_payloads.append(
-            {
-                "id": source_file["id"],
-                "filename": source_file["original_filename"],
-                "format": source_file["format"],
-                "row_count": row_count,
-                "column_count": source_file["column_count"],
-                "columns": columns,
-                "status": source_file["status"],
-                "error_message": source_file["error_message"],
-                "created_at": source_file["created_at"],
-            }
-        )
-    return {
-        "id": migration["id"],
-        "name": migration["name"],
-        "entity": migration["entity"],
-        "status": migration["status"],
-        "auto_remove_exact_duplicates": bool(migration["auto_remove_exact_duplicates"]),
-        "created_at": migration["created_at"],
-        "files": file_payloads,
-        "file_count": len(file_payloads),
-        "total_source_rows": total_rows,
-    }
-
-
-def update_migration_options(migration_id: int, auto_remove_exact_duplicates: bool) -> dict:
-    get_migration(migration_id)
-    with db_session() as connection:
-        connection.execute(
-            "UPDATE migrations SET auto_remove_exact_duplicates = ? WHERE id = ?",
-            (1 if auto_remove_exact_duplicates else 0, migration_id),
-        )
-    return get_migration(migration_id)
-
-
 def ingest_bytes(migration_id: int, filename: str, content: bytes) -> dict:
-    get_migration(migration_id)
+    require_migration(migration_id)
     original = _safe_name(filename)
     ext = _extension(original)
     if ext not in ALLOWED_EXTENSIONS:
-        raise IngestionError(
+        raise AppError(
             f"Unsupported file format '{ext or original}'. Upload .csv or .xlsx only."
         )
 
@@ -189,8 +101,6 @@ def ingest_bytes(migration_id: int, filename: str, content: bytes) -> dict:
                 "UPDATE migrations SET status = 'FILES_STAGED' WHERE id = ?",
                 (migration_id,),
             )
-            from app.services.audit import SYSTEM, append_audit
-
             append_audit(
                 connection,
                 migration_id,
@@ -209,7 +119,7 @@ def ingest_bytes(migration_id: int, filename: str, content: bytes) -> dict:
             "status": "READY",
             "error_message": None,
         }
-    except IngestionError:
+    except AppError:
         stored_path.unlink(missing_ok=True)
         raise
     except Exception as exc:
@@ -224,7 +134,7 @@ def ingest_bytes(migration_id: int, filename: str, content: bytes) -> dict:
                 """,
                 (migration_id, original, str(stored_path), format_label, str(exc), created_at),
             )
-        raise IngestionError(
+        raise AppError(
             f"Could not read '{original}'. The file was rejected and not skipped silently.",
             400,
         ) from exc
@@ -242,7 +152,7 @@ def load_demo_files(migration_id: int) -> dict:
     ]
     missing = [str(path.name) for path in demo_files if not path.exists()]
     if missing:
-        raise IngestionError(
+        raise AppError(
             f"Demo files missing: {', '.join(missing)}. Generate employee_master.xlsx first.",
             500,
         )
@@ -267,7 +177,7 @@ def preview_source_file(migration_id: int, source_file_id: int, limit: int = 20)
             (source_file_id, migration_id),
         ).fetchone()
         if source_file is None:
-            raise IngestionError("Source file was not found for this migration.", 404)
+            raise AppError("Source file was not found for this migration.", 404)
         rows = connection.execute(
             """
             SELECT source_file, source_row_number, payload_json
@@ -318,7 +228,7 @@ def delete_source_file(migration_id: int, source_file_id: int) -> dict:
             (source_file_id, migration_id),
         ).fetchone()
         if source_file is None:
-            raise IngestionError("Source file was not found for this migration.", 404)
+            raise AppError("Source file was not found for this migration.", 404)
         stored_path = Path(source_file["stored_path"])
         connection.execute("DELETE FROM source_rows WHERE source_file_id = ?", (source_file_id,))
         connection.execute("DELETE FROM source_files WHERE id = ?", (source_file_id,))
@@ -338,7 +248,7 @@ def delete_source_file(migration_id: int, source_file_id: int) -> dict:
 def attach_lineage(migration_id: int, source_row_ids: list[int], employee_id: str | None = None) -> dict:
     """Store multiple source-row references on one normalized record."""
     if not source_row_ids:
-        raise IngestionError("At least one source row is required for lineage.")
+        raise AppError("At least one source row is required for lineage.")
     with db_session() as connection:
         cursor = connection.execute(
             """
@@ -360,7 +270,7 @@ def attach_lineage(migration_id: int, source_row_ids: list[int], employee_id: st
                 (source_row_id, migration_id),
             ).fetchone()
             if row is None:
-                raise IngestionError(f"Source row {source_row_id} was not found in this migration.", 404)
+                raise AppError(f"Source row {source_row_id} was not found in this migration.", 404)
             connection.execute(
                 """
                 INSERT INTO record_lineage (

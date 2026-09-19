@@ -3,16 +3,12 @@ from __future__ import annotations
 import json
 
 from app.database import db_session, utcnow
-from app.services.ingestion import IngestionError, get_migration
-from app.services.mapping_policy import (
-    AUTO_APPROVED,
-    IGNORED,
-    MANUALLY_APPROVED,
-    NEEDS_REVIEW,
-    evaluate_mapping_policy,
-)
-from app.services.source_analysis import analyze_migration
+from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
+from app.services.audit import AGENT, HUMAN, append_audit
+from app.services.mapping_policy import evaluate_mapping_policy
+from app.services.migrations import require_migration
+from app.services.source_analysis import analyze_migration
 
 TARGET_FIELD_NAMES = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
 
@@ -86,8 +82,6 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
             "UPDATE migrations SET status = 'MAPPINGS_GENERATED' WHERE id = ?",
             (migration_id,),
         )
-        from app.services.audit import AGENT, append_audit
-
         append_audit(
             connection,
             migration_id,
@@ -99,17 +93,15 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
     return list_mappings(migration_id)
 
 
-def list_mappings(migration_id: int) -> dict:
-    get_migration(migration_id)
-    with db_session() as connection:
-        rows = connection.execute(
-            """
-            SELECT * FROM column_mappings
-            WHERE migration_id = ?
-            ORDER BY source_file, source_column
-            """,
-            (migration_id,),
-        ).fetchall()
+def list_mappings_from_connection(connection, migration_id: int) -> dict:
+    rows = connection.execute(
+        """
+        SELECT * FROM column_mappings
+        WHERE migration_id = ?
+        ORDER BY source_file, source_column
+        """,
+        (migration_id,),
+    ).fetchall()
     mappings = [_row_to_mapping(row) for row in rows]
     blocking = sum(1 for item in mappings if item["review_required"])
     return {
@@ -121,10 +113,15 @@ def list_mappings(migration_id: int) -> dict:
     }
 
 
+def list_mappings(migration_id: int) -> dict:
+    with db_session() as connection:
+        require_migration(migration_id, connection)
+        return list_mappings_from_connection(connection, migration_id)
+
+
 def update_mapping(migration_id: int, mapping_id: int, action: str, target_field: str | None = None) -> dict:
-    """Update mapping within a single session (fix closure bug)."""
     if action not in {"map", "ignore"}:
-        raise IngestionError("Invalid mapping action. Use 'map' or 'ignore'.", 400)
+        raise AppError("Invalid mapping action. Use 'map' or 'ignore'.", 400)
 
     with db_session() as connection:
         row = connection.execute(
@@ -132,7 +129,7 @@ def update_mapping(migration_id: int, mapping_id: int, action: str, target_field
             (mapping_id, migration_id),
         ).fetchone()
         if row is None:
-            raise IngestionError("Mapping not found for this migration.", 404)
+            raise AppError("Mapping not found for this migration.", 404)
 
         if action == "ignore":
             policy = evaluate_mapping_policy(
@@ -144,7 +141,7 @@ def update_mapping(migration_id: int, mapping_id: int, action: str, target_field
             ignored_flag = 1
         else:
             if not target_field or target_field not in TARGET_FIELD_NAMES:
-                raise IngestionError(
+                raise AppError(
                     f"target_field must be one of: {', '.join(TARGET_FIELD_NAMES)}",
                     400,
                 )
@@ -178,4 +175,22 @@ def update_mapping(migration_id: int, mapping_id: int, action: str, target_field
             "SELECT * FROM column_mappings WHERE id = ?",
             (mapping_id,),
         ).fetchone()
+        if action == "ignore":
+            append_audit(
+                connection,
+                migration_id,
+                HUMAN,
+                "mapping ignored",
+                row["source_column"],
+                f"Ignored {row['source_file']} column '{row['source_column']}'",
+            )
+        else:
+            append_audit(
+                connection,
+                migration_id,
+                HUMAN,
+                "human correction",
+                row["source_column"],
+                f"Mapped {row['source_file']} '{row['source_column']}' to '{target_field}'",
+            )
     return _row_to_mapping(updated)

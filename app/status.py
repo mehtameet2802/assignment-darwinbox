@@ -1,0 +1,12 @@
+from __future__ import annotations
+
+# Shared record / escalation / workflow statuses (stored in SQLite).
+NEEDS_REVIEW = "NEEDS_REVIEW"
+READY_TO_PUSH = "READY_TO_PUSH"
+EXCLUDED = "EXCLUDED"
+RESOLVED = "RESOLVED"
+TRANSFORMED = "TRANSFORMED"
+PUSHED = "PUSHED"
+PUSH_FAILED = "PUSH_FAILED"
+ROLLED_BACK = "ROLLED_BACK"
+EXACT_DEDUPED = "EXACT_DEDUPED"

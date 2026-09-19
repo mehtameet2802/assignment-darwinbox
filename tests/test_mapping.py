@@ -3,12 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
 from app.services.mapping import deterministic_mapping, normalize_header, resolve_alias
-from app.services.source_analysis import analyze_migration
 from app.services.type_inference import classify_value, infer_column_type
-from flask_app import create_app
 
 
 def test_normalize_header_is_case_insensitive() -> None:

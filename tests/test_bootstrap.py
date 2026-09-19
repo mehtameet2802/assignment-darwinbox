@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from flask_app import create_app
+
 from app.database import init_db, ping_db
 from app.schema import EMPLOYEE_TARGET_SCHEMA, target_schema_summary
-from flask_app import create_app
 
 
 def test_sqlite_connection_works(tmp_path: Path) -> None:
