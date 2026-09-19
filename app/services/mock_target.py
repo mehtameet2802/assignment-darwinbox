@@ -87,16 +87,35 @@ def list_batch_records(batch_id: str) -> list[dict[str, Any]]:
     return [{"employee_id": row["employee_id"]} for row in rows]
 
 
+def _display_name_from_payload(payload: dict[str, Any]) -> str:
+    first = str(payload.get("first_name") or "").strip()
+    last = str(payload.get("last_name") or "").strip()
+    combined = f"{first} {last}".strip()
+    if combined:
+        return combined
+    legacy = payload.get("name") or payload.get("full_name")
+    if legacy and str(legacy).strip():
+        return str(legacy).strip()
+    return "—"
+
+
 def list_target_records_for_migration(migration_id: int) -> list[dict[str, Any]]:
+    """List mock-target rows for a migration (one row per stored target employee)."""
     with db_session() as connection:
         rows = connection.execute(
             """
             SELECT mtr.employee_id, mtr.batch_id, mtr.payload_json, mtr.created_at,
-                   nr.status AS migration_record_status
+                   (
+                       SELECT nr.status
+                       FROM normalized_records nr
+                       WHERE nr.migration_id = pb.migration_id
+                         AND nr.employee_id = mtr.employee_id
+                         AND nr.status = 'PUSHED'
+                       ORDER BY nr.id DESC
+                       LIMIT 1
+                   ) AS migration_record_status
             FROM mock_target_records mtr
             INNER JOIN push_batches pb ON pb.id = CAST(mtr.batch_id AS INTEGER)
-            LEFT JOIN normalized_records nr
-                ON nr.migration_id = pb.migration_id AND nr.employee_id = mtr.employee_id
             WHERE pb.migration_id = ?
             ORDER BY mtr.employee_id
             """,
@@ -109,7 +128,7 @@ def list_target_records_for_migration(migration_id: int) -> list[dict[str, Any]]
             {
                 "employee_id": row["employee_id"],
                 "batch_id": row["batch_id"],
-                "name": payload.get("name") or payload.get("full_name") or "—",
+                "name": _display_name_from_payload(payload),
                 "email": payload.get("email") or "—",
                 "department": payload.get("department") or "—",
                 "migration_record_status": row["migration_record_status"],
