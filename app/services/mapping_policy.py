@@ -14,6 +14,7 @@ RULE_CONFIDENCE = "confidence_below_threshold"
 RULE_STRUCTURAL = "structural_incompatibility"
 RULE_NO_MAPPING = "mapping_not_produced_safely"
 RULE_HUMAN_RESOLVED = "human_resolved"
+RULE_TARGET_FIELD_COLLISION = "TARGET_FIELD_COLLISION"
 
 
 def evaluate_mapping_policy(

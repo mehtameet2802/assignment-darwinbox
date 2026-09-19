@@ -45,6 +45,26 @@ def resolve_alias(source_column: str) -> str | None:
     return None
 
 
+FULL_NAME_SOURCE_HEADERS = frozenset({"full_name", "name", "employee_name"})
+
+
+def is_full_name_source_column(source_column: str) -> bool:
+    return normalize_header(source_column) in FULL_NAME_SOURCE_HEADERS
+
+
+def split_full_name(raw: object) -> tuple[str | None, str | None]:
+    """Tier-2 rule: first token → first_name, remainder → last_name."""
+    if raw is None:
+        return None, None
+    text = str(raw).strip()
+    if not text:
+        return None, None
+    parts = text.split()
+    if len(parts) == 1:
+        return parts[0], None
+    return parts[0], " ".join(parts[1:])
+
+
 def deterministic_mapping(source_column: str) -> dict | None:
     target = resolve_alias(source_column)
     if target is None:

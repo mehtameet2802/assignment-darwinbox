@@ -5,9 +5,10 @@ import json
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
-from app.services.cleaning import clean_for_target_field, target_field_type
+from app.services.cleaning import clean_for_target_field, clean_string, target_field_type
 from app.services.date_escalations import list_date_escalations
-from app.services.mapping_store import list_mappings
+from app.services.mapping import is_full_name_source_column, split_full_name
+from app.services.mapping_store import list_mappings, refresh_target_field_collisions
 from app.services.migrations import require_migration
 from app.status import TRANSFORMED
 
@@ -40,6 +41,11 @@ def transform_migration(migration_id: int) -> dict:
 
     with db_session() as connection:
         require_migration(migration_id, connection)
+        if refresh_target_field_collisions(connection, migration_id):
+            raise AppError(
+                "Resolve TARGET_FIELD_COLLISION mapping reviews before transforming.",
+                400,
+            )
         connection.execute(
             """
             DELETE FROM record_lineage
@@ -65,17 +71,30 @@ def transform_migration(migration_id: int) -> dict:
         ).fetchall()
 
         mapping_index = {
-            (m["source_file_id"], m["source_column"]): m["final_target"] for m in active_mappings
+            (m["source_file_id"], m["source_column"]): m for m in active_mappings
         }
 
         for row in rows:
             payload = json.loads(row["payload_json"])
             normalized = {field: None for field in TARGET_FIELDS}
             for source_column, raw_value in payload.items():
-                target = mapping_index.get((row["source_file_id"], source_column))
-                if not target:
+                mapping = mapping_index.get((row["source_file_id"], source_column))
+                if not mapping:
                     continue
+                target = mapping["final_target"]
                 date_format = date_formats.get((row["source_file_id"], source_column))
+
+                if target == "first_name" and is_full_name_source_column(source_column):
+                    first_raw, last_raw = split_full_name(raw_value)
+                    first_clean = clean_string(first_raw) if first_raw is not None else clean_string(None)
+                    if first_clean.ok:
+                        normalized["first_name"] = first_clean.value
+                    if last_raw is not None:
+                        last_clean = clean_string(last_raw)
+                        if last_clean.ok and normalized.get("last_name") is None:
+                            normalized["last_name"] = last_clean.value
+                    continue
+
                 cleaned = clean_for_target_field(target, raw_value, date_format=date_format)
                 if cleaned.ok:
                     normalized[target] = cleaned.value
