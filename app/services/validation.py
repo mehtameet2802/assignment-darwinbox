@@ -9,8 +9,11 @@ from app.database import db_session, utcnow
 from app.errors import AppError
 from app.models.employee import EmployeeRecord
 from app.schema import EMPLOYEE_TARGET_SCHEMA
-from app.services.audit import HUMAN, SYSTEM, append_audit
+from app.services.audit import AGENT, HUMAN, SYSTEM, append_audit
+from app.services.cleaning_escalations import collect_record_cleaning_failures
+from app.services.date_escalations import list_date_escalations
 from app.services.duplicates import open_duplicate_conflict_record_ids
+from app.services.mapping_store import list_mappings_from_connection
 from app.services.migrations import require_migration
 from app.status import EXCLUDED, NEEDS_REVIEW, READY_TO_PUSH, RESOLVED, TRANSFORMED
 
@@ -18,6 +21,14 @@ REQUIRED_VALUE_MISSING = "REQUIRED_VALUE_MISSING"
 VALIDATION_FAILURE = "VALIDATION_FAILURE"
 
 REQUIRED_FIELDS = [f["name"] for f in EMPLOYEE_TARGET_SCHEMA["fields"] if f["required"]]
+
+
+def _date_format_lookup_from_payload(dates_payload: dict) -> dict[tuple[int, str], str]:
+    lookup: dict[tuple[int, str], str] = {}
+    for item in dates_payload["escalations"]:
+        if item["chosen_format"]:
+            lookup[(item["source_file_id"], item["source_column"])] = item["chosen_format"]
+    return lookup
 
 
 def _is_missing(value: Any) -> bool:
@@ -63,6 +74,9 @@ def validate_migration(migration_id: int) -> dict:
             (migration_id,),
         )
         skip_record_ids = open_duplicate_conflict_record_ids(connection, migration_id)
+        mappings_payload = list_mappings_from_connection(connection, migration_id)
+        active_mappings = mappings_payload["mappings"]
+        date_formats = _date_format_lookup_from_payload(list_date_escalations(migration_id))
         rows = connection.execute(
             """
             SELECT id, employee_id, payload_json, status
@@ -77,8 +91,54 @@ def validate_migration(migration_id: int) -> dict:
             if row["id"] in skip_record_ids:
                 continue
             payload = json.loads(row["payload_json"] or "{}")
-            result = assess_record(payload)
+            cleaning_failures = collect_record_cleaning_failures(
+                connection,
+                migration_id,
+                row["id"],
+                date_formats,
+                active_mappings,
+            )
             validated += 1
+            if cleaning_failures:
+                for failure in cleaning_failures:
+                    escalated += 1
+                    connection.execute(
+                        "UPDATE normalized_records SET status = ? WHERE id = ?",
+                        (NEEDS_REVIEW, row["id"]),
+                    )
+                    append_audit(
+                        connection,
+                        migration_id,
+                        AGENT,
+                        "cleaning escalation created",
+                        row["employee_id"],
+                        failure["review_reason"],
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO validation_escalations (
+                            migration_id, normalized_record_id, employee_id,
+                            issue_type, field_name, rule_fired, review_reason,
+                            current_payload_json, status, updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            migration_id,
+                            row["id"],
+                            row["employee_id"],
+                            failure["issue_type"],
+                            failure["field_name"],
+                            failure["rule_fired"],
+                            failure["review_reason"],
+                            json.dumps(payload),
+                            NEEDS_REVIEW,
+                            now,
+                        ),
+                    )
+                continue
+
+            result = assess_record(payload)
             if result["status"] == READY_TO_PUSH:
                 connection.execute(
                     "UPDATE normalized_records SET status = ? WHERE id = ?",

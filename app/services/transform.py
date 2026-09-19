@@ -5,7 +5,12 @@ import json
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
-from app.services.cleaning import clean_for_target_field, clean_string, target_field_type
+from app.services.cleaning import (
+    clean_for_target_field,
+    clean_string,
+    is_null_sentinel,
+    target_field_type,
+)
 from app.services.date_escalations import list_date_escalations
 from app.services.mapping import is_full_name_source_column, split_full_name
 from app.services.mapping_store import list_mappings, refresh_target_field_collisions
@@ -101,8 +106,12 @@ def transform_migration(migration_id: int) -> dict:
                 elif target_field_type(target) == "email" and cleaned.value is not None:
                     # Keep malformed emails for Phase 9 validation (E010).
                     normalized[target] = cleaned.value
-                else:
+                elif is_null_sentinel(raw_value):
                     normalized[target] = None
+                else:
+                    # Preserve supplied value for cleaning-failure escalation (do not silently drop).
+                    text = str(raw_value).strip()
+                    normalized[target] = text if text else None
 
             cursor = connection.execute(
                 """
