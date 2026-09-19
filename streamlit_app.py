@@ -395,8 +395,8 @@ def render_analysis_review() -> None:
         st.info("Select a migration first.")
         return
 
-    st.subheader("Transform & duplicates")
-    col_t, col_d = st.columns(2)
+    st.subheader("Transform, duplicates & validation")
+    col_t, col_d, col_v = st.columns(3)
     with col_t:
         if st.button("Transform source rows"):
             resp = api_post(f"/api/migrations/{migration['id']}/transform")
@@ -412,6 +412,49 @@ def render_analysis_review() -> None:
                 st.rerun()
             else:
                 show_api_error(resp, "Duplicate analysis failed.")
+    with col_v:
+        if st.button("Validate records"):
+            resp = api_post(f"/api/migrations/{migration['id']}/validate")
+            if resp.status_code == 201:
+                st.session_state.pop(f"val_{migration['id']}", None)
+                st.rerun()
+            else:
+                show_api_error(resp, "Validation failed.")
+
+    queue = api_get(f"/api/migrations/{migration['id']}/review-queue")
+    if queue.status_code == 200:
+        q = queue.json()
+        st.markdown(f"**Unified review queue** — {q.get('blocking_count', 0)} blocking item(s)")
+        for item in q.get("items", []):
+            with st.expander(f"{item['category']} • {item.get('employee_id') or item.get('source_column', '')}"):
+                st.error(f"Rule fired: {item.get('rule_fired')} — {item.get('review_reason')}")
+
+    val_resp = api_get(f"/api/migrations/{migration['id']}/validation-escalations")
+    if val_resp.status_code == 200:
+        for esc in val_resp.json().get("escalations", []):
+            if esc["status"] != "NEEDS_REVIEW":
+                continue
+            st.markdown(f"**{esc['employee_id']}** — {esc['issue_type']}")
+            st.caption(esc["review_reason"])
+            new_email = st.text_input("Enter email", key=f"val_email_{esc['id']}")
+            if st.button("Save value", key=f"val_save_{esc['id']}"):
+                resp = api_patch(
+                    f"/api/migrations/{migration['id']}/validation-escalations/{esc['id']}",
+                    json={"action": "enter_value", "field_name": "email", "value": new_email},
+                )
+                if resp.status_code == 200:
+                    st.rerun()
+                else:
+                    show_api_error(resp, "Could not update record.")
+            if st.button("Exclude record", key=f"val_ex_{esc['id']}"):
+                resp = api_patch(
+                    f"/api/migrations/{migration['id']}/validation-escalations/{esc['id']}",
+                    json={"action": "exclude"},
+                )
+                if resp.status_code == 200:
+                    st.rerun()
+                else:
+                    show_api_error(resp, "Could not exclude record.")
 
     dup_payload = st.session_state.get(f"dup_{migration['id']}")
     if dup_payload is None:

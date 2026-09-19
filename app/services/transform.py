@@ -4,7 +4,7 @@ import json
 
 from app.database import db_session, utcnow
 from app.schema import EMPLOYEE_TARGET_SCHEMA
-from app.services.cleaning import clean_for_target_field
+from app.services.cleaning import clean_for_target_field, target_field_type
 from app.services.date_escalations import list_date_escalations
 from app.services.ingestion import IngestionError, get_migration
 from app.services.mapping_store import list_mappings
@@ -76,6 +76,9 @@ def transform_migration(migration_id: int) -> dict:
                 date_format = date_formats.get((row["source_file_id"], source_column))
                 cleaned = clean_for_target_field(target, raw_value, date_format=date_format)
                 if cleaned.ok:
+                    normalized[target] = cleaned.value
+                elif target_field_type(target) == "email" and cleaned.value is not None:
+                    # Keep malformed emails for Phase 9 validation (E010).
                     normalized[target] = cleaned.value
                 else:
                     normalized[target] = None

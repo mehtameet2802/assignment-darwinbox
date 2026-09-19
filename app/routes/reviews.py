@@ -9,6 +9,12 @@ from app.services.date_escalations import (
     scan_date_columns,
 )
 from app.services.ingestion import IngestionError
+from app.services.review_queue import get_unified_review_queue
+from app.services.validation import (
+    list_validation_escalations,
+    resolve_validation_escalation,
+    validate_migration,
+)
 
 reviews_bp = Blueprint("reviews", __name__)
 
@@ -50,6 +56,47 @@ def scan_dates(migration_id: int):
 def get_date_escalations(migration_id: int):
     try:
         return jsonify(list_date_escalations(migration_id))
+    except IngestionError as exc:
+        return _error(exc)
+
+
+@reviews_bp.post("/api/migrations/<int:migration_id>/validate")
+def validate(migration_id: int):
+    try:
+        return jsonify(validate_migration(migration_id)), 201
+    except IngestionError as exc:
+        return _error(exc)
+
+
+@reviews_bp.get("/api/migrations/<int:migration_id>/validation-escalations")
+def validation_escalations(migration_id: int):
+    try:
+        return jsonify(list_validation_escalations(migration_id))
+    except IngestionError as exc:
+        return _error(exc)
+
+
+@reviews_bp.patch("/api/migrations/<int:migration_id>/validation-escalations/<int:escalation_id>")
+def patch_validation_escalation(migration_id: int, escalation_id: int):
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify(
+            resolve_validation_escalation(
+                migration_id,
+                escalation_id,
+                action=payload.get("action"),
+                field_name=payload.get("field_name"),
+                value=payload.get("value"),
+            )
+        )
+    except IngestionError as exc:
+        return _error(exc)
+
+
+@reviews_bp.get("/api/migrations/<int:migration_id>/review-queue")
+def review_queue(migration_id: int):
+    try:
+        return jsonify(get_unified_review_queue(migration_id))
     except IngestionError as exc:
         return _error(exc)
 
