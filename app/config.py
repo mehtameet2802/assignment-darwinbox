@@ -19,6 +19,8 @@ FLASK_DEBUG = _env("FLASK_DEBUG", "true").lower() in {"1", "true", "yes"}
 
 DATABASE_PATH = PROJECT_ROOT / _env("DATABASE_PATH", "data/migration.db")
 UPLOAD_DIR = PROJECT_ROOT / _env("UPLOAD_DIR", "data/uploads")
+DEMO_DIR = PROJECT_ROOT / _env("DEMO_DIR", "data/demo")
+MAX_UPLOAD_BYTES = int(_env("MAX_UPLOAD_BYTES", str(200 * 1024 * 1024)))
 
 OLLAMA_BASE_URL = _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = _env("OLLAMA_MODEL", "llama3.1")
