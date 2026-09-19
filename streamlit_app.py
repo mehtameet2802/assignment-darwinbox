@@ -388,13 +388,64 @@ def render_mappings_review() -> None:
 
 def render_analysis_review() -> None:
     st.title("Analysis & Review")
-    st.caption("Column-level date format ambiguity is resolved once per source column.")
+    st.caption("Resolve date formats, transform records, and reconcile duplicate conflicts.")
     render_migration_picker()
     migration = current_migration()
     if migration is None:
         st.info("Select a migration first.")
         return
 
+    st.subheader("Transform & duplicates")
+    col_t, col_d = st.columns(2)
+    with col_t:
+        if st.button("Transform source rows"):
+            resp = api_post(f"/api/migrations/{migration['id']}/transform")
+            if resp.status_code == 201:
+                st.success(f"Transformed {resp.json().get('records_created')} records.")
+            else:
+                show_api_error(resp, "Transform failed.")
+    with col_d:
+        if st.button("Analyze duplicates"):
+            resp = api_post(f"/api/migrations/{migration['id']}/duplicates/analyze")
+            if resp.status_code == 201:
+                st.session_state[f"dup_{migration['id']}"] = resp.json()
+                st.rerun()
+            else:
+                show_api_error(resp, "Duplicate analysis failed.")
+
+    dup_payload = st.session_state.get(f"dup_{migration['id']}")
+    if dup_payload is None:
+        cached_dup = api_get(f"/api/migrations/{migration['id']}/duplicate-conflicts")
+        if cached_dup.status_code == 200:
+            dup_payload = cached_dup.json()
+    if dup_payload and dup_payload.get("conflicts"):
+        st.markdown(f"**Duplicate conflicts** — {dup_payload.get('blocking_count', 0)} blocking")
+        for conflict in dup_payload["conflicts"]:
+            with st.expander(
+                f"{conflict['employee_id']} — {conflict['status']}",
+                expanded=conflict["status"] == "NEEDS_REVIEW",
+            ):
+                st.error(f"Rule fired: {conflict['review_reason']}")
+                for idx, member in enumerate(conflict["members"]):
+                    st.write(f"Record {idx + 1}: {member['payload']}")
+                    for src in member.get("sources", []):
+                        st.caption(f"{src['source_file']} row {src['source_row_number']}")
+                if conflict["status"] == "NEEDS_REVIEW" and conflict["members"]:
+                    base = conflict["members"][0]["payload"]
+                    email = st.text_input("Final email", value=base.get("email") or "", key=f"email_{conflict['id']}")
+                    if st.button("Save resolution", key=f"save_dup_{conflict['id']}"):
+                        final_payload = {**base, "email": email}
+                        resp = api_patch(
+                            f"/api/migrations/{migration['id']}/duplicate-conflicts/{conflict['id']}",
+                            json={"action": "save", "final_payload": final_payload},
+                        )
+                        if resp.status_code == 200:
+                            st.session_state.pop(f"dup_{migration['id']}", None)
+                            st.rerun()
+                        else:
+                            show_api_error(resp, "Could not save duplicate resolution.")
+
+    st.subheader("Date format")
     if st.button("Scan date columns", type="primary"):
         response = api_post(f"/api/migrations/{migration['id']}/date-columns/scan")
         if response.status_code == 201:
@@ -411,41 +462,40 @@ def render_analysis_review() -> None:
             st.session_state[f"date_esc_{migration['id']}"] = payload
 
     if not payload or not payload.get("escalations"):
-        st.info("Run **Scan date columns** after mappings target `joining_date`.")
-        return
-
-    if payload.get("blocking_count"):
+        st.caption("Run **Scan date columns** after mappings target `joining_date`.")
+    elif payload.get("blocking_count"):
         st.warning(f"{payload['blocking_count']} date column(s) need format selection.")
-    else:
+    elif payload:
         st.success("All date columns have a resolved format.")
 
-    for item in payload["escalations"]:
-        with st.expander(
-            f"{item['source_file']} • {item['source_column']} — {item['status']}",
-            expanded=item["status"] == "NEEDS_REVIEW",
-        ):
-            st.write(f"**Issue:** {item['issue_type']}")
-            st.write(f"**Samples:** {', '.join(item['sample_values'][:6])}")
-            if item.get("review_reason"):
-                st.error(item["review_reason"])
-            if item["status"] == "NEEDS_REVIEW":
-                fmt = st.radio(
-                    "Choose column date format",
-                    ["DD/MM/YYYY", "MM/DD/YYYY"],
-                    key=f"date_fmt_{item['id']}",
-                )
-                if st.button("Apply to entire column", key=f"date_apply_{item['id']}"):
-                    resp = api_patch(
-                        f"/api/migrations/{migration['id']}/date-escalations/{item['id']}",
-                        json={"chosen_format": fmt},
+    if payload and payload.get("escalations"):
+        for item in payload["escalations"]:
+            with st.expander(
+                f"{item['source_file']} • {item['source_column']} — {item['status']}",
+                expanded=item["status"] == "NEEDS_REVIEW",
+            ):
+                st.write(f"**Issue:** {item['issue_type']}")
+                st.write(f"**Samples:** {', '.join(item['sample_values'][:6])}")
+                if item.get("review_reason"):
+                    st.error(item["review_reason"])
+                if item["status"] == "NEEDS_REVIEW":
+                    fmt = st.radio(
+                        "Choose column date format",
+                        ["DD/MM/YYYY", "MM/DD/YYYY"],
+                        key=f"date_fmt_{item['id']}",
                     )
-                    if resp.status_code == 200:
-                        st.session_state.pop(f"date_esc_{migration['id']}", None)
-                        st.rerun()
-                    else:
-                        show_api_error(resp, "Could not resolve date format.")
-            else:
-                st.write(f"**Chosen format:** {item.get('chosen_format')}")
+                    if st.button("Apply to entire column", key=f"date_apply_{item['id']}"):
+                        resp = api_patch(
+                            f"/api/migrations/{migration['id']}/date-escalations/{item['id']}",
+                            json={"chosen_format": fmt},
+                        )
+                        if resp.status_code == 200:
+                            st.session_state.pop(f"date_esc_{migration['id']}", None)
+                            st.rerun()
+                        else:
+                            show_api_error(resp, "Could not resolve date format.")
+                else:
+                    st.write(f"**Chosen format:** {item.get('chosen_format')}")
 
 
 if page == PIPELINE_PAGES[0]:

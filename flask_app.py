@@ -12,6 +12,7 @@ from app.config import (
     OLLAMA_MODEL,
 )
 from app.database import init_db, ping_db
+from app.routes.duplicates import duplicates_bp
 from app.routes.mappings import mappings_bp
 from app.routes.migrations import migrations_bp
 from app.routes.reviews import reviews_bp
@@ -25,6 +26,7 @@ def create_app() -> Flask:
     app.register_blueprint(migrations_bp)
     app.register_blueprint(mappings_bp)
     app.register_blueprint(reviews_bp)
+    app.register_blueprint(duplicates_bp)
 
     @app.get("/health")
     def health():

@@ -22,6 +22,9 @@ ALIAS_TO_TARGET: dict[str, str] = {
     "department": "department",
     "city": "city",
     "office": "city",
+    "employee_name": "first_name",
+    "full_name": "first_name",
+    "name": "first_name",
 }
 
 
