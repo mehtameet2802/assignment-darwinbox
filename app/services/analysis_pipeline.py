@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from app.database import db_session
 from app.errors import AppError
+from app.services.audit import AGENT, append_audit
 from app.services.date_escalations import list_date_escalations, scan_date_columns
 from app.services.duplicates import analyze_duplicates, list_duplicate_conflicts
 from app.services.migrations import get_migration
@@ -58,6 +60,19 @@ def _run_processing_stages(migration_id: int) -> dict:
         "ready_to_push": validation_result.get("ready_to_push", 0),
         "validation_escalations": validation_result.get("validation_escalations", 0),
     }
+    with db_session() as connection:
+        append_audit(
+            connection,
+            migration_id,
+            AGENT,
+            "analysis pipeline completed",
+            "employees",
+            (
+                f"Transformed {snapshot['last_run']['records_transformed']} record(s); "
+                f"{snapshot['last_run']['ready_to_push']} ready; "
+                f"{snapshot['last_run']['validation_escalations']} validation escalation(s)."
+            ),
+        )
     return snapshot
 
 

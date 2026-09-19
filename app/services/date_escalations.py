@@ -4,7 +4,7 @@ import json
 
 from app.database import db_session, utcnow
 from app.errors import AppError
-from app.services.audit import HUMAN, append_audit
+from app.services.audit import AGENT, HUMAN, append_audit
 from app.services.date_format_llm import AUTO_RESOLVE_CONFIDENCE, suggest_date_format
 from app.services.dates import FORMAT_DMY, FORMAT_MDY, analyze_date_column
 from app.services.mapping_store import list_mappings_from_connection
@@ -131,6 +131,30 @@ def scan_date_columns(migration_id: int) -> dict:
                     now,
                 ),
             )
+            entity = f"{mapping['source_file']}:{mapping['source_column']}"
+            if status == RESOLVED and chosen:
+                action = (
+                    "date format auto-resolved"
+                    if issue_type in {"AUTO_RESOLVED", "OLLAMA_AUTO_RESOLVED"}
+                    else "date format resolved"
+                )
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    action,
+                    entity,
+                    review_reason or f"Using {chosen} for column '{mapping['source_column']}'.",
+                )
+            elif status == NEEDS_REVIEW:
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "date format escalated",
+                    entity,
+                    review_reason or "Ambiguous date format requires human confirmation.",
+                )
         return list_date_escalations_from_connection(connection, migration_id)
 
 

@@ -36,6 +36,12 @@ def test_demo_path_writes_audit_entries(client) -> None:
     assert "migration created" in actions
     assert "file uploaded" in actions
     assert "mapping generated" in actions
+    assert "mapping auto-approved" in actions
+    assert "transform completed" in actions
+    assert "duplicate analysis completed" in actions
+    assert "exact duplicate deduplicated" in actions
+    assert actions & {"date format auto-resolved", "date format escalated", "date format resolved"}
+    assert "validation completed" in actions
     assert "validation escalation created" in actions
     assert "push attempted" in actions
     assert "push failed" in actions

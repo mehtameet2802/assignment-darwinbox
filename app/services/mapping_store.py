@@ -9,6 +9,7 @@ from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
 from app.services.audit import AGENT, HUMAN, append_audit
 from app.services.mapping_policy import (
+    AUTO_APPROVED,
     RULE_TARGET_FIELD_COLLISION,
     evaluate_mapping_policy,
 )
@@ -152,6 +153,32 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
                     now,
                 ),
             )
+            entity = f"{column['source_file']}:{column['source_column']}"
+            method = column.get("mapping_method") or "unmapped"
+            confidence = column.get("confidence")
+            conf_text = f"{confidence:.2f}" if confidence is not None else "n/a"
+            if policy["review_required"]:
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "mapping review required",
+                    entity,
+                    policy["review_reason"]
+                    or f"Review required for '{column['source_column']}'.",
+                )
+            elif policy["status"] == AUTO_APPROVED and policy["final_target"]:
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "mapping auto-approved",
+                    entity,
+                    (
+                        f"Mapped to '{policy['final_target']}' via {method} "
+                        f"(confidence {conf_text})."
+                    ),
+                )
         connection.execute(
             "UPDATE migrations SET status = 'MAPPINGS_GENERATED' WHERE id = ?",
             (migration_id,),

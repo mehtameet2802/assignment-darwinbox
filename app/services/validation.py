@@ -187,6 +187,14 @@ def validate_migration(migration_id: int) -> dict:
             "UPDATE migrations SET status = 'VALIDATED' WHERE id = ?",
             (migration_id,),
         )
+        append_audit(
+            connection,
+            migration_id,
+            AGENT,
+            "validation completed",
+            "employees",
+            f"{ready} record(s) ready to push, {escalated} validation escalation(s).",
+        )
 
     return {
         "migration_id": migration_id,

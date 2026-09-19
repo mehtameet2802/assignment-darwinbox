@@ -5,6 +5,7 @@ import json
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
+from app.services.audit import AGENT, append_audit
 from app.services.cleaning import (
     clean_for_target_field,
     clean_string,
@@ -141,6 +142,14 @@ def transform_migration(migration_id: int) -> dict:
         connection.execute(
             "UPDATE migrations SET status = ? WHERE id = ?",
             (TRANSFORMED, migration_id),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            AGENT,
+            "transform completed",
+            "employees",
+            f"Created {created} normalized record(s) from mapped source rows.",
         )
 
     return {"migration_id": migration_id, "records_created": created}
