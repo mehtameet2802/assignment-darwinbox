@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS column_mappings (
     FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE CASCADE,
     UNIQUE (migration_id, source_file_id, source_column)
 );
+
+CREATE TABLE IF NOT EXISTS date_column_escalations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    source_file_id INTEGER NOT NULL,
+    source_file TEXT NOT NULL,
+    source_column TEXT NOT NULL,
+    issue_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    chosen_format TEXT,
+    sample_values_json TEXT NOT NULL,
+    review_reason TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE CASCADE,
+    UNIQUE (migration_id, source_file_id, source_column)
+);
 """
 
 

@@ -116,8 +116,12 @@ def target_field_type(field_name: str) -> str | None:
     return None
 
 
-def clean_for_target_field(field_name: str, raw: Any) -> CleanResult:
-    """Apply Tier-1 cleaning for a target schema field (dates handled in Phase 7)."""
+def clean_for_target_field(
+    field_name: str,
+    raw: Any,
+    date_format: str | None = None,
+) -> CleanResult:
+    """Apply Tier-1 cleaning for a target schema field."""
     if field_name == "employee_id":
         return clean_employee_id(raw)
     field_type = target_field_type(field_name)
@@ -126,9 +130,9 @@ def clean_for_target_field(field_name: str, raw: Any) -> CleanResult:
     if field_type == "string":
         return clean_string(raw)
     if field_type == "date":
-        if is_null_sentinel(raw):
-            return CleanResult(value=None, ok=True)
-        return clean_string(raw)
+        from app.services.dates import clean_joining_date
+
+        return clean_joining_date(str(raw) if raw is not None else "", column_format=date_format)
     if field_type == "number":
         return clean_number(raw)
     if field_type == "boolean":
