@@ -140,6 +140,19 @@ CREATE TABLE IF NOT EXISTS validation_escalations (
     FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
     FOREIGN KEY (normalized_record_id) REFERENCES normalized_records(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS mock_target_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL,
+    employee_id TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mock_target_e009_state (
+    employee_id TEXT PRIMARY KEY,
+    push_count INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
