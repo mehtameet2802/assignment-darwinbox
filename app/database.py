@@ -124,6 +124,22 @@ CREATE TABLE IF NOT EXISTS duplicate_conflicts (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS validation_escalations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    normalized_record_id INTEGER NOT NULL,
+    employee_id TEXT,
+    issue_type TEXT NOT NULL,
+    field_name TEXT,
+    rule_fired TEXT NOT NULL,
+    review_reason TEXT NOT NULL,
+    current_payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
+    FOREIGN KEY (normalized_record_id) REFERENCES normalized_records(id) ON DELETE CASCADE
+);
 """
 
 
