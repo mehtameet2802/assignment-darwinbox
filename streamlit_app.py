@@ -386,10 +386,74 @@ def render_mappings_review() -> None:
                         show_api_error(resp, "Could not ignore field.")
 
 
+def render_analysis_review() -> None:
+    st.title("Analysis & Review")
+    st.caption("Column-level date format ambiguity is resolved once per source column.")
+    render_migration_picker()
+    migration = current_migration()
+    if migration is None:
+        st.info("Select a migration first.")
+        return
+
+    if st.button("Scan date columns", type="primary"):
+        response = api_post(f"/api/migrations/{migration['id']}/date-columns/scan")
+        if response.status_code == 201:
+            st.session_state[f"date_esc_{migration['id']}"] = response.json()
+            st.rerun()
+        else:
+            show_api_error(response, "Date scan failed.")
+
+    payload = st.session_state.get(f"date_esc_{migration['id']}")
+    if payload is None:
+        cached = api_get(f"/api/migrations/{migration['id']}/date-escalations")
+        if cached.status_code == 200 and cached.json().get("escalation_count"):
+            payload = cached.json()
+            st.session_state[f"date_esc_{migration['id']}"] = payload
+
+    if not payload or not payload.get("escalations"):
+        st.info("Run **Scan date columns** after mappings target `joining_date`.")
+        return
+
+    if payload.get("blocking_count"):
+        st.warning(f"{payload['blocking_count']} date column(s) need format selection.")
+    else:
+        st.success("All date columns have a resolved format.")
+
+    for item in payload["escalations"]:
+        with st.expander(
+            f"{item['source_file']} • {item['source_column']} — {item['status']}",
+            expanded=item["status"] == "NEEDS_REVIEW",
+        ):
+            st.write(f"**Issue:** {item['issue_type']}")
+            st.write(f"**Samples:** {', '.join(item['sample_values'][:6])}")
+            if item.get("review_reason"):
+                st.error(item["review_reason"])
+            if item["status"] == "NEEDS_REVIEW":
+                fmt = st.radio(
+                    "Choose column date format",
+                    ["DD/MM/YYYY", "MM/DD/YYYY"],
+                    key=f"date_fmt_{item['id']}",
+                )
+                if st.button("Apply to entire column", key=f"date_apply_{item['id']}"):
+                    resp = api_patch(
+                        f"/api/migrations/{migration['id']}/date-escalations/{item['id']}",
+                        json={"chosen_format": fmt},
+                    )
+                    if resp.status_code == 200:
+                        st.session_state.pop(f"date_esc_{migration['id']}", None)
+                        st.rerun()
+                    else:
+                        show_api_error(resp, "Could not resolve date format.")
+            else:
+                st.write(f"**Chosen format:** {item.get('chosen_format')}")
+
+
 if page == PIPELINE_PAGES[0]:
     render_new_migration()
 elif page == PIPELINE_PAGES[1]:
     render_mappings_review()
+elif page == PIPELINE_PAGES[2]:
+    render_analysis_review()
 elif page == PIPELINE_PAGES[-1]:
     st.title("Settings / Target Schema")
     render_schema_card()
