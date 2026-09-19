@@ -4,14 +4,27 @@ import streamlit as st
 
 from ui.api import api_get, show_api_error
 from ui.migration import require_migration
+from ui.navigation import render_pipeline_stepper
 
 AUDIT_PAGE_SIZE = 25
 
-st.caption("Immutable history of agent, system, and human actions for this migration.")
+render_pipeline_stepper(4)
 
-migration = require_migration("Select a migration first.")
+st.caption(
+    "Immutable history for **any** migration — in progress, finished push, or not yet pushed. "
+    "Closing the push workflow (so it leaves the Push page) is separate: that only happens when you click "
+    "**Complete migration** on Push to target."
+)
+
+migration = require_migration("Select a migration to view its audit log.")
 if migration is None:
     st.stop()
+
+st.subheader(f"MIG-{migration['id']} • {migration['name']}")
+if migration.get("completed_at"):
+    st.caption(f"Push workflow: **finished** ({migration['completed_at']})")
+else:
+    st.caption(f"Push workflow: **not closed** · migration status **{migration.get('status', '—')}**")
 
 offset_key = f"audit_offset_{migration['id']}"
 if offset_key not in st.session_state:

@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.config import APP_VERSION, BACKEND_URL
+from app import config as app_config
 from ui.api import fetch_backend_health
 
+APP_NAME = getattr(app_config, "APP_NAME", "Migration Studio")
+APP_TAGLINE = getattr(app_config, "APP_TAGLINE", "Employee HRIS migration console")
+APP_VERSION = app_config.APP_VERSION
+BACKEND_URL = app_config.BACKEND_URL
+
 st.set_page_config(
-    page_title="SyncHR Migrate",
+    page_title=APP_NAME,
     page_icon=":material/folder_open:",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -32,7 +37,8 @@ page = st.navigation(
 )
 
 with st.sidebar:
-    st.caption("AI HRIS migration console")
+    st.markdown(f"**{APP_NAME}**")
+    st.caption(APP_TAGLINE)
     backend_ok, health = fetch_backend_health()
     sqlite_ok = backend_ok and health.get("sqlite", {}).get("initialized") == "true"
     if backend_ok and sqlite_ok:

@@ -42,12 +42,25 @@ In a second terminal:
 streamlit run streamlit_app.py
 ```
 
-Load demo files from `data/demo/` or use **Load spec demo files** in the UI. Run deterministic analysis, then **Run Ollama semantic mapping** (Ollama must be running).
+Load demo files from `data/demo/` or use **Load demo files into this migration** on **New migration**. On **Mappings & review**, click **Generate column mappings** (Ollama first, alias fallback if Ollama fails; Ollama should be running for best results).
 
 ## Running tests
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
+```
+
+Lint (same as CI):
+
+```bash
+ruff check app tests ui app_pages flask_app.py streamlit_app.py scripts
+```
+
+API acceptance flow (mocked Ollama via `unittest.mock`):
+
+```bash
+pytest -q tests/test_e2e_acceptance.py
 ```
 
 Unit tests mock Ollama; live checks use `scripts/verify_ollama.py` and `scripts/eval_mapping_samples.py`.

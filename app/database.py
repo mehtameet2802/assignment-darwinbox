@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS migrations (
     entity TEXT NOT NULL DEFAULT 'employees',
     status TEXT NOT NULL DEFAULT 'CREATED',
     auto_remove_exact_duplicates INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    completed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS source_files (
@@ -158,6 +159,7 @@ CREATE TABLE IF NOT EXISTS push_batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     migration_id INTEGER NOT NULL,
     status TEXT NOT NULL,
+    operation TEXT NOT NULL DEFAULT 'push',
     created_at TEXT NOT NULL,
     rolled_back_at TEXT,
     FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
@@ -186,6 +188,8 @@ CREATE TABLE IF NOT EXISTS push_attempts (
     http_status INTEGER,
     result TEXT NOT NULL,
     error_message TEXT,
+    operation TEXT,
+    response_json TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (push_batch_id) REFERENCES push_batches(id) ON DELETE CASCADE,
     FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
@@ -225,9 +229,26 @@ def db_session(db_path: Path | None = None) -> Generator[sqlite3.Connection, Non
         connection.close()
 
 
+def _apply_schema_migrations(connection: sqlite3.Connection) -> None:
+    migrations = [
+        "ALTER TABLE date_column_escalations ADD COLUMN suggested_format TEXT",
+        "ALTER TABLE date_column_escalations ADD COLUMN suggestion_confidence REAL",
+        "ALTER TABLE push_batches ADD COLUMN operation TEXT NOT NULL DEFAULT 'push'",
+        "ALTER TABLE push_attempts ADD COLUMN operation TEXT",
+        "ALTER TABLE push_attempts ADD COLUMN response_json TEXT",
+        "ALTER TABLE migrations ADD COLUMN completed_at TEXT",
+    ]
+    for statement in migrations:
+        try:
+            connection.execute(statement)
+        except sqlite3.OperationalError:
+            pass
+
+
 def init_db(db_path: Path | None = None) -> None:
     with db_session(db_path) as connection:
         connection.executescript(SCHEMA_SQL)
+        _apply_schema_migrations(connection)
         connection.execute(
             "INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)",
             ("initialized", "true"),

@@ -46,7 +46,7 @@ Verify:
 
 - **Endpoint:** `POST {OLLAMA_BASE_URL}/api/generate`
 - **Client:** `app/services/llm_client.py` (`LLMClient.infer_mapping`)
-- **Trigger:** `GET /api/migrations/<id>/source-analysis?include_semantic=true` or Streamlit **Run Ollama semantic mapping**
+- **Trigger:** `POST /api/migrations/<id>/mappings/generate?include_semantic=true` or Streamlit **Generate column mappings** (Ollama per column, then deterministic alias fallback)
 
 ---
 

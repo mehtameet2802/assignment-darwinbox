@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.config import MOCK_OLLAMA_MAPPING, OLLAMA_BASE_URL, OLLAMA_MODEL
 from app.schema import EMPLOYEE_TARGET_SCHEMA
 
 TARGET_FIELD_NAMES = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
@@ -41,6 +41,10 @@ class LLMClient:
             "method": "ollama",
             "success": False,
         }
+        if MOCK_OLLAMA_MAPPING:
+            from app.testing.llm_mock import mock_infer_mapping
+
+            return mock_infer_mapping(source_column, source_type, sample_values)
         try:
             raw = self._call_ollama(source_column, source_type, sample_values)
             parsed = parse_mapping_json(raw)

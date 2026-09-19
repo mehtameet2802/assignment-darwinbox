@@ -27,3 +27,24 @@ OLLAMA_MODEL = _env("OLLAMA_MODEL", "llama3.2:3b")
 
 BACKEND_URL = _env("BACKEND_URL", f"http://{FLASK_HOST}:{FLASK_PORT}")
 APP_VERSION = "0.1.0"
+APP_NAME = _env("APP_NAME", "Migration Studio")
+APP_TAGLINE = _env("APP_TAGLINE", "Employee HRIS migration console")
+
+__all__ = [
+    "APP_NAME",
+    "APP_TAGLINE",
+    "APP_VERSION",
+    "BACKEND_URL",
+    "DATABASE_PATH",
+    "DEMO_DIR",
+    "FLASK_DEBUG",
+    "FLASK_HOST",
+    "FLASK_PORT",
+    "MAX_UPLOAD_BYTES",
+    "MOCK_OLLAMA_MAPPING",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_MODEL",
+    "UPLOAD_DIR",
+]
+
+MOCK_OLLAMA_MAPPING = _env("MOCK_OLLAMA_MAPPING", "false").lower() in {"1", "true", "yes"}
