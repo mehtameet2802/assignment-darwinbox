@@ -5,7 +5,7 @@ import streamlit as st
 
 from ui.api import api_delete, api_get, api_patch, api_post, show_api_error
 from ui.migration import current_migration
-from ui.migration_picker import migration_selectbox_index
+from ui.migration_picker import sync_migration_selectbox
 from ui.navigation import PAGE_MAPPINGS, render_pipeline_stepper, switch_to
 from ui.schema import render_schema_card
 
@@ -35,12 +35,8 @@ with col_existing:
         for item in listing
     }
     option_labels = ["(none)"] + list(labels.keys())
-    selected = st.selectbox(
-        "Active migration",
-        option_labels,
-        index=migration_selectbox_index(option_labels, labels),
-        key="new_migration_active_pick",
-    )
+    sync_migration_selectbox("new_migration_active_pick", option_labels, labels)
+    selected = st.selectbox("Active migration", option_labels, key="new_migration_active_pick")
     if selected != "(none)":
         st.session_state.migration_id = labels[selected]
 

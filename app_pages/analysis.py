@@ -25,6 +25,56 @@ if migration is None:
 mid = migration["id"]
 snapshot_key = f"analysis_snapshot_{mid}"
 
+_PIPELINE_PHASES: tuple[tuple[str, str], ...] = (
+    ("date_scan", "Scan date columns"),
+    ("transform", "Transform source rows"),
+    ("duplicates", "Analyze duplicates"),
+    ("validate", "Validate records"),
+)
+
+
+def _phase_state_key() -> str:
+    return f"analysis_phases_{mid}"
+
+
+def _set_phase(phase_id: str, state: str) -> None:
+    phases = st.session_state.setdefault(_phase_state_key(), {})
+    phases[phase_id] = state
+
+
+def _hydrate_phases_from_last_run(last: dict) -> None:
+    if not last:
+        return
+    if last.get("phase") == "blocked_dates":
+        _set_phase("date_scan", "blocked")
+        return
+    if last.get("phase") in _SUCCESS_PHASES:
+        for phase_id, _label in _PIPELINE_PHASES:
+            _set_phase(phase_id, "done")
+
+
+def _render_pipeline_phases() -> None:
+    st.subheader("Processing status")
+    states = st.session_state.get(_phase_state_key(), {})
+    icons = {
+        "pending": ":gray[○]",
+        "running": ":orange[⏳]",
+        "done": ":green[✓]",
+        "blocked": ":orange[⚠]",
+        "error": ":red[✗]",
+    }
+    for phase_id, label in _PIPELINE_PHASES:
+        state = states.get(phase_id, "pending")
+        icon = icons.get(state, icons["pending"])
+        detail = {
+            "pending": "Waiting",
+            "running": "In progress",
+            "done": "Complete",
+            "blocked": "Needs your input",
+            "error": "Failed",
+        }[state]
+        st.markdown(f"{icon} **{label}** — {detail}")
+
 
 def _load_snapshot() -> dict | None:
     resp = api_get(f"/api/migrations/{mid}/analysis/snapshot")
@@ -52,7 +102,10 @@ def _merge_snapshot(last_run: dict) -> None:
 
 
 def _run_analysis() -> None:
+    for phase_id, _label in _PIPELINE_PHASES:
+        _set_phase(phase_id, "pending")
     with st.status("Agent pipeline", expanded=True) as pipeline_status:
+        _set_phase("date_scan", "running")
         st.write("Scanning mapped date columns…")
         scan = api_post(f"/api/migrations/{mid}/date-columns/scan", timeout=120)
         if scan.status_code != 201:
@@ -62,6 +115,7 @@ def _run_analysis() -> None:
         date_payload = scan.json()
         blocking_dates = date_payload.get("blocking_count", 0)
         st.write(f"✓ Date scan complete ({blocking_dates} column(s) need confirmation)")
+        _set_phase("date_scan", "blocked" if blocking_dates else "done")
         if blocking_dates > 0:
             pipeline_status.update(label="Waiting on date format confirmation", state="complete")
             _merge_snapshot(
@@ -73,19 +127,24 @@ def _run_analysis() -> None:
             st.rerun()
             return
 
+        _set_phase("transform", "running")
         st.write("Transforming source rows…")
         transform = api_post(f"/api/migrations/{mid}/transform", timeout=120)
         if transform.status_code != 201:
+            _set_phase("transform", "error")
             show_api_error(transform, "Transform failed.")
             pipeline_status.update(label="Transform failed", state="error")
             return
         transform_payload = transform.json()
         created = transform_payload.get("records_created", 0)
         st.write(f"✓ Transformed {created} record(s)")
+        _set_phase("transform", "done")
 
+        _set_phase("duplicates", "running")
         st.write("Analyzing duplicates…")
         dupes = api_post(f"/api/migrations/{mid}/duplicates/analyze", timeout=120)
         if dupes.status_code != 201:
+            _set_phase("duplicates", "error")
             show_api_error(dupes, "Duplicate analysis failed.")
             pipeline_status.update(label="Duplicate analysis failed", state="error")
             return
@@ -95,10 +154,13 @@ def _run_analysis() -> None:
         st.write(
             f"✓ Duplicate scan complete ({exact} exact group(s) collapsed, {conflicts} conflict(s))"
         )
+        _set_phase("duplicates", "done")
 
+        _set_phase("validate", "running")
         st.write("Validating records…")
         validation = api_post(f"/api/migrations/{mid}/validate", timeout=120)
         if validation.status_code != 201:
+            _set_phase("validate", "error")
             show_api_error(validation, "Validation failed.")
             pipeline_status.update(label="Validation failed", state="error")
             return
@@ -107,6 +169,7 @@ def _run_analysis() -> None:
             f"✓ Validation complete ({val_payload.get('ready_to_push', 0)} ready, "
             f"{val_payload.get('validation_escalations', 0)} escalation(s))"
         )
+        _set_phase("validate", "done")
         pipeline_status.update(label="Analysis pipeline complete", state="complete")
 
     _merge_snapshot(
@@ -225,6 +288,9 @@ if st.button("Run analysis", type="primary"):
 
 snapshot = _load_snapshot()
 last = (snapshot or {}).get("last_run") or {}
+_hydrate_phases_from_last_run(last)
+_render_pipeline_phases()
+
 issues = (snapshot or {}).get("issues_requiring_review", 0)
 analysis_ok = _analysis_succeeded(last)
 

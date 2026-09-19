@@ -44,6 +44,12 @@ streamlit run streamlit_app.py
 
 Load demo files from `data/demo/` or use **Load demo files into this migration** on **New migration**. On **Mappings & review**, click **Generate column mappings** (Ollama first, alias fallback if Ollama fails; Ollama should be running for best results).
 
+Ambiguous date columns (for example `employees_extra.csv` / `Date`) always require **human** format confirmation; the model may suggest DD/MM/YYYY or MM/DD/YYYY but will not auto-apply on ambiguity alone.
+
+## Demo recording
+
+Follow [docs/DEMO_RECORDING.md](docs/DEMO_RECORDING.md) for a single take-home video: one escalation resolution, E009 push failure, and retry success.
+
 ## Running tests
 
 ```bash
@@ -61,6 +67,12 @@ API acceptance flow (mocked Ollama via `unittest.mock`):
 
 ```bash
 pytest -q tests/test_e2e_acceptance.py
+```
+
+Streamlit UI smoke tests (headless `AppTest`, mocked backend):
+
+```bash
+pytest -q tests/test_streamlit_apptest.py
 ```
 
 Unit tests mock Ollama; live checks use `scripts/verify_ollama.py` and `scripts/eval_mapping_samples.py`.
