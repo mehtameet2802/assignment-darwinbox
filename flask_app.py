@@ -12,6 +12,7 @@ from app.config import (
     OLLAMA_MODEL,
 )
 from app.database import init_db, ping_db
+from app.routes.mappings import mappings_bp
 from app.routes.migrations import migrations_bp
 from app.schema import target_schema_summary
 
@@ -21,6 +22,7 @@ def create_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
     init_db()
     app.register_blueprint(migrations_bp)
+    app.register_blueprint(mappings_bp)
 
     @app.get("/health")
     def health():

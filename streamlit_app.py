@@ -235,8 +235,33 @@ def render_new_migration() -> None:
         )
         st.rerun()
 
-    st.button("Start Analysis & AI Field Matching", disabled=True)
-    st.caption("Mapping and AI start in Phase 3–5. Unresolved mappings will block transform then.")
+    if migration["file_count"] > 0:
+        if st.button("Run deterministic column analysis"):
+            analysis = api_get(f"/api/migrations/{migration['id']}/source-analysis")
+            if analysis.status_code == 200:
+                st.session_state[f"analysis_{migration['id']}"] = analysis.json()
+            else:
+                show_api_error(analysis, "Column analysis failed.")
+        analysis_payload = st.session_state.get(f"analysis_{migration['id']}")
+        if analysis_payload:
+            st.markdown(
+                f"**Deterministic analysis** — {analysis_payload['deterministic_mappings']} / "
+                f"{analysis_payload['column_count']} columns mapped via aliases"
+            )
+            analysis_rows = [
+                {
+                    "Source file": item["source_file"],
+                    "Source column": item["source_column"],
+                    "Detected type": item["detected_source_type"],
+                    "Proposed target": item["proposed_target"] or "—",
+                    "Samples": ", ".join(item["sample_values"][:3]),
+                }
+                for item in analysis_payload["columns"]
+            ]
+            st.dataframe(analysis_rows, hide_index=True, width="stretch")
+
+    st.button("Start AI semantic matching", disabled=True)
+    st.caption("Ollama semantic mapping and review policy arrive in Phases 4–5.")
     with start_later:
         st.caption(f"Status: {migration['status']}")
 
