@@ -1,0 +1,17 @@
+---
+description: Feature-branch workflow; never commit or push new work directly on main
+alwaysApply: true
+---
+
+# Git workflow
+
+The first bootstrap commit on `main` is historical. All later work uses this flow:
+
+1. Start from an up-to-date `main`: `git checkout main && git pull`
+2. Create a new branch named for the work (`feat/phase-2-ingestion`, `fix/...`, `chore/...`)
+3. Commit only on that branch
+4. Push the branch and open a PR into `main`
+5. Merge into `main` only via that PR (or an explicit user request to merge)
+
+Do not commit, amend, or push feature work directly on `main`.
+Do not reuse one long-lived feature branch for unrelated phases.
