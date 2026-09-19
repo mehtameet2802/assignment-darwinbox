@@ -68,6 +68,31 @@ CREATE TABLE IF NOT EXISTS record_lineage (
     FOREIGN KEY (source_row_id) REFERENCES source_rows(id) ON DELETE CASCADE,
     UNIQUE (normalized_record_id, source_row_id)
 );
+
+CREATE TABLE IF NOT EXISTS column_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    source_file_id INTEGER NOT NULL,
+    source_file TEXT NOT NULL,
+    source_column TEXT NOT NULL,
+    detected_source_type TEXT NOT NULL,
+    sample_values_json TEXT NOT NULL,
+    proposed_target TEXT,
+    final_target TEXT,
+    mapping_method TEXT,
+    confidence REAL,
+    ai_reason TEXT,
+    alternatives_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    review_required INTEGER NOT NULL DEFAULT 0,
+    review_rule_fired TEXT,
+    review_reason TEXT,
+    ignored INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE CASCADE,
+    UNIQUE (migration_id, source_file_id, source_column)
+);
 """
 
 

@@ -4,7 +4,9 @@ import requests
 import streamlit as st
 
 from app.config import APP_VERSION, BACKEND_URL
-from app.schema import target_schema_summary
+from app.schema import EMPLOYEE_TARGET_SCHEMA, target_schema_summary
+
+TARGET_FIELDS = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
 
 PIPELINE_PAGES = [
     "1. New Migration & File Analysis",
@@ -94,6 +96,14 @@ if not backend_ok:
         "Start it with `python flask_app.py` in another terminal."
     )
     st.stop()
+
+
+def render_migration_picker() -> None:
+    listing = api_get("/api/migrations").json().get("migrations", [])
+    labels = {f"MIG-{item['id']} • {item['name']} ({item['file_count']} files)": item["id"] for item in listing}
+    selected = st.selectbox("Active migration", ["(none)"] + list(labels.keys()), key="active_migration_pick")
+    if selected != "(none)":
+        st.session_state.migration_id = labels[selected]
 
 
 def current_migration() -> dict | None:
@@ -282,13 +292,104 @@ def render_new_migration() -> None:
             ]
             st.dataframe(analysis_rows, hide_index=True, width="stretch")
 
-    st.caption("Review policy (0.85 threshold + structural checks) is Phase 5.")
     with start_later:
         st.caption(f"Status: {migration['status']}")
 
 
+def render_mappings_review() -> None:
+    st.title("Mappings & Ambiguity Review")
+    st.caption("Application policy decides review (0.85 threshold + structural compatibility). Humans resolve escalations.")
+    render_migration_picker()
+    migration = current_migration()
+    if migration is None:
+        st.info("Select or create a migration on the New Migration page first.")
+        return
+    if migration["file_count"] == 0:
+        st.warning("Upload source files before generating mappings.")
+        return
+
+    if st.button("Generate mappings (aliases + Ollama)", type="primary"):
+        response = api_post(
+            f"/api/migrations/{migration['id']}/mappings/generate?include_semantic=true",
+            timeout=180,
+        )
+        if response.status_code == 201:
+            st.session_state[f"mappings_{migration['id']}"] = response.json()
+            st.rerun()
+        else:
+            show_api_error(response, "Could not generate mappings.")
+
+    payload = st.session_state.get(f"mappings_{migration['id']}")
+    if payload is None:
+        cached = api_get(f"/api/migrations/{migration['id']}/mappings")
+        if cached.status_code == 200 and cached.json().get("mapping_count"):
+            payload = cached.json()
+            st.session_state[f"mappings_{migration['id']}"] = payload
+
+    if not payload or not payload.get("mappings"):
+        st.info("No mappings stored yet. Click **Generate mappings**.")
+        return
+
+    blocking = payload.get("blocking_review_count", 0)
+    if blocking:
+        st.warning(f"{blocking} column(s) still need review before transform can continue.")
+    else:
+        st.success("All mapping issues resolved or auto-approved.")
+
+    for item in payload["mappings"]:
+        status = item["status"]
+        title = f"{item['source_file']} • {item['source_column']} — {status}"
+        with st.expander(title, expanded=item["review_required"]):
+            st.write(f"**Detected type:** {item['detected_source_type']}")
+            st.write(f"**Samples:** {', '.join(item['sample_values'][:5])}")
+            st.write(f"**Proposed target:** {item['proposed_target'] or '—'}")
+            st.write(f"**Final target:** {item['final_target'] or '—'}")
+            st.write(f"**Method:** {item['mapping_method'] or '—'}")
+            st.write(f"**Confidence:** {item['confidence'] if item['confidence'] is not None else '—'}")
+            if item.get("ai_reason"):
+                st.write(f"**AI reason:** {item['ai_reason']}")
+            if item["review_required"] and item.get("review_reason"):
+                st.error(f"Needs review: {item['review_reason']}")
+            elif item["status"] == "AUTO_APPROVED":
+                st.success("Auto-approved (confidence and structure OK). Still editable below.")
+
+            col_map, col_ignore = st.columns(2)
+            with col_map:
+                chosen = st.selectbox(
+                    "Map to target field",
+                    TARGET_FIELDS,
+                    key=f"map_target_{item['id']}",
+                    index=TARGET_FIELDS.index(item["final_target"])
+                    if item["final_target"] in TARGET_FIELDS
+                    else 0,
+                )
+                if st.button("Save mapping", key=f"save_map_{item['id']}"):
+                    resp = api_patch(
+                        f"/api/migrations/{migration['id']}/mappings/{item['id']}",
+                        json={"action": "map", "target_field": chosen},
+                    )
+                    if resp.status_code == 200:
+                        st.session_state.pop(f"mappings_{migration['id']}", None)
+                        st.rerun()
+                    else:
+                        show_api_error(resp, "Could not save mapping.")
+            with col_ignore:
+                if st.button("Ignore source field", key=f"ignore_{item['id']}"):
+                    resp = api_patch(
+                        f"/api/migrations/{migration['id']}/mappings/{item['id']}",
+                        json={"action": "ignore"},
+                    )
+                    if resp.status_code == 200:
+                        st.session_state.pop(f"mappings_{migration['id']}", None)
+                        st.rerun()
+                    else:
+                        show_api_error(resp, "Could not ignore field.")
+
+
 if page == PIPELINE_PAGES[0]:
     render_new_migration()
+elif page == PIPELINE_PAGES[1]:
+    render_mappings_review()
 elif page == PIPELINE_PAGES[-1]:
     st.title("Settings / Target Schema")
     render_schema_card()
