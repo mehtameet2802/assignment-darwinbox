@@ -1,5 +1,3 @@
-Yes — these are good additions. I’d make all three changes now: explicit multi-row lineage, a precedence note between §2.1 and §5, and an operating-discipline prompt that travels with the spec.
-
 # Darwinbox Forward Deployed Engineer — Master Implementation Specification
 
 > **Purpose of this document**

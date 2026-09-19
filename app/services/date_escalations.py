@@ -5,7 +5,7 @@ import json
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.services.audit import AGENT, HUMAN, append_audit
-from app.services.date_format_llm import AUTO_RESOLVE_CONFIDENCE, suggest_date_format
+from app.services.date_format_llm import suggest_date_format
 from app.services.dates import FORMAT_DMY, FORMAT_MDY, analyze_date_column
 from app.services.mapping_store import list_mappings_from_connection
 from app.services.migrations import require_migration
@@ -85,17 +85,17 @@ def scan_date_columns(migration_id: int) -> dict:
                 )
                 suggested_format = suggestion.get("suggested_format")
                 suggestion_confidence = suggestion.get("confidence")
-                if (
-                    suggested_format
-                    and suggestion_confidence is not None
-                    and suggestion_confidence >= AUTO_RESOLVE_CONFIDENCE
-                ):
-                    status = RESOLVED
-                    chosen = suggested_format
-                    issue_type = "OLLAMA_AUTO_RESOLVED"
-                    review_reason = suggestion.get("reason") or f"Ollama auto-selected {chosen}."
-                elif suggestion.get("reason"):
-                    review_reason = suggestion["reason"]
+                status = NEEDS_REVIEW
+                chosen = None
+                issue_type = analysis["issue_type"] or "DATE_FORMAT_AMBIGUITY"
+                review_reason = (
+                    analysis["review_reason"]
+                    or "Date format is ambiguous; confirm DD/MM/YYYY or MM/DD/YYYY."
+                )
+                if suggestion.get("reason"):
+                    review_reason = (
+                        f"{review_reason} Model suggestion (not auto-applied): {suggestion['reason']}"
+                    )
 
             connection.execute(
                 """

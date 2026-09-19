@@ -5,6 +5,7 @@ import streamlit as st
 
 from ui.api import api_delete, api_get, api_patch, api_post, show_api_error
 from ui.migration import current_migration
+from ui.migration_picker import migration_selectbox_index
 from ui.navigation import PAGE_MAPPINGS, render_pipeline_stepper, switch_to
 from ui.schema import render_schema_card
 
@@ -29,8 +30,17 @@ with col_new:
             show_api_error(response, "Could not create migration.")
 with col_existing:
     listing = api_get("/api/migrations").json().get("migrations", [])
-    labels = {f"MIG-{item['id']} • {item['name']} ({item['file_count']} files)": item["id"] for item in listing}
-    selected = st.selectbox("Active migration", ["(none)"] + list(labels.keys()))
+    labels = {
+        f"MIG-{item['id']} • {item['name']} ({item['file_count']} files)": item["id"]
+        for item in listing
+    }
+    option_labels = ["(none)"] + list(labels.keys())
+    selected = st.selectbox(
+        "Active migration",
+        option_labels,
+        index=migration_selectbox_index(option_labels, labels),
+        key="new_migration_active_pick",
+    )
     if selected != "(none)":
         st.session_state.migration_id = labels[selected]
 

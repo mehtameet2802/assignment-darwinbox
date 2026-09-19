@@ -106,3 +106,53 @@ def test_scan_creates_one_column_escalation_for_extra_date(client) -> None:
 
     needs_review = [e for e in payload["escalations"] if e["status"] == "NEEDS_REVIEW"]
     assert all(e["source_column"] != "Date" or e["source_file"] != "employees_extra.csv" for e in needs_review)
+
+
+def test_ambiguous_column_stays_escalated_despite_high_confidence_model(client) -> None:
+    created = client.post("/api/migrations", json={"name": "Ambiguous dates"})
+    migration_id = created.get_json()["id"]
+    client.post(f"/api/migrations/{migration_id}/demo-files")
+
+    mock_semantic = {
+        "target_field": "joining_date",
+        "confidence": 0.95,
+        "reason": "semantic",
+        "alternatives": [],
+        "method": "ollama",
+        "success": True,
+    }
+
+    def fake_infer(column, source_type, samples):
+        if column == "Date":
+            return {**mock_semantic, "source_column": column}
+        return {"success": False, "target_field": None}
+
+    high_conf_suggestion = {
+        "suggested_format": FORMAT_DMY,
+        "confidence": 0.99,
+        "reason": "Model is very sure.",
+    }
+
+    with patch("app.services.llm_client.LLMClient.infer_mapping", side_effect=fake_infer):
+        client.post(f"/api/migrations/{migration_id}/mappings/generate?include_semantic=true")
+
+    with patch(
+        "app.services.date_escalations.suggest_date_format",
+        return_value=high_conf_suggestion,
+    ):
+        ambiguous_samples = ["03/04/2024", "05/06/2024"]
+        with patch(
+            "app.services.date_escalations._collect_column_values",
+            return_value=ambiguous_samples,
+        ):
+            response = client.post(f"/api/migrations/{migration_id}/date-columns/scan")
+
+    assert response.status_code == 201
+    extra = [
+        e
+        for e in response.get_json()["escalations"]
+        if e["source_file"] == "employees_extra.csv" and e["source_column"] == "Date"
+    ]
+    assert len(extra) == 1
+    assert extra[0]["status"] == "NEEDS_REVIEW"
+    assert extra[0]["chosen_format"] is None

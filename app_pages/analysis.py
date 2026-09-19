@@ -41,14 +41,86 @@ def _store_snapshot(payload: dict) -> None:
     st.session_state[snapshot_key] = payload
 
 
+def _merge_snapshot(last_run: dict) -> None:
+    resp = api_get(f"/api/migrations/{mid}/analysis/snapshot")
+    if resp.status_code != 200:
+        show_api_error(resp, "Could not load analysis snapshot.")
+        return
+    payload = resp.json()
+    payload["last_run"] = last_run
+    _store_snapshot(payload)
+
+
 def _run_analysis() -> None:
-    with st.spinner("Running analysis…"):
-        resp = api_post(f"/api/migrations/{mid}/analysis/run", timeout=300)
-    if resp.status_code == 201:
-        _store_snapshot(resp.json())
-        st.rerun()
-    else:
-        show_api_error(resp, "Analysis run failed.")
+    with st.status("Agent pipeline", expanded=True) as pipeline_status:
+        st.write("Scanning mapped date columns…")
+        scan = api_post(f"/api/migrations/{mid}/date-columns/scan", timeout=120)
+        if scan.status_code != 201:
+            show_api_error(scan, "Date column scan failed.")
+            pipeline_status.update(label="Date scan failed", state="error")
+            return
+        date_payload = scan.json()
+        blocking_dates = date_payload.get("blocking_count", 0)
+        st.write(f"✓ Date scan complete ({blocking_dates} column(s) need confirmation)")
+        if blocking_dates > 0:
+            pipeline_status.update(label="Waiting on date format confirmation", state="complete")
+            _merge_snapshot(
+                {
+                    "phase": "blocked_dates",
+                    "message": "Date format must be confirmed before processing continues.",
+                }
+            )
+            st.rerun()
+            return
+
+        st.write("Transforming source rows…")
+        transform = api_post(f"/api/migrations/{mid}/transform", timeout=120)
+        if transform.status_code != 201:
+            show_api_error(transform, "Transform failed.")
+            pipeline_status.update(label="Transform failed", state="error")
+            return
+        transform_payload = transform.json()
+        created = transform_payload.get("records_created", 0)
+        st.write(f"✓ Transformed {created} record(s)")
+
+        st.write("Analyzing duplicates…")
+        dupes = api_post(f"/api/migrations/{mid}/duplicates/analyze", timeout=120)
+        if dupes.status_code != 201:
+            show_api_error(dupes, "Duplicate analysis failed.")
+            pipeline_status.update(label="Duplicate analysis failed", state="error")
+            return
+        dup_payload = dupes.json()
+        exact = dup_payload.get("exact_duplicate_groups_collapsed", 0)
+        conflicts = dup_payload.get("duplicate_conflicts", 0)
+        st.write(
+            f"✓ Duplicate scan complete ({exact} exact group(s) collapsed, {conflicts} conflict(s))"
+        )
+
+        st.write("Validating records…")
+        validation = api_post(f"/api/migrations/{mid}/validate", timeout=120)
+        if validation.status_code != 201:
+            show_api_error(validation, "Validation failed.")
+            pipeline_status.update(label="Validation failed", state="error")
+            return
+        val_payload = validation.json()
+        st.write(
+            f"✓ Validation complete ({val_payload.get('ready_to_push', 0)} ready, "
+            f"{val_payload.get('validation_escalations', 0)} escalation(s))"
+        )
+        pipeline_status.update(label="Analysis pipeline complete", state="complete")
+
+    _merge_snapshot(
+        {
+            "phase": "full_processing",
+            "records_transformed": transform_payload.get("records_created", 0),
+            "exact_duplicate_groups_handled": dup_payload.get("exact_duplicate_groups_collapsed", 0),
+            "duplicate_conflicts_created": dup_payload.get("duplicate_conflicts", 0),
+            "records_validated": val_payload.get("records_validated", 0),
+            "ready_to_push": val_payload.get("ready_to_push", 0),
+            "validation_escalations": val_payload.get("validation_escalations", 0),
+        }
+    )
+    st.rerun()
 
 
 def _continue_after(after: str) -> None:

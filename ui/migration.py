@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.api import api_get
+from ui.migration_picker import migration_selectbox_index
 
 __all__ = [
     "analysis_review_complete",
@@ -88,9 +89,17 @@ def _render_migration_picker_from_list(
     if empty_hint and not items:
         st.caption(empty_hint)
     labels = {_migration_label(item): item["id"] for item in items}
-    selected = st.selectbox(label, ["(none)"] + list(labels.keys()), key=session_key)
+    option_labels = ["(none)"] + list(labels.keys())
+    selected = st.selectbox(
+        label,
+        option_labels,
+        index=migration_selectbox_index(option_labels, labels),
+        key=session_key,
+    )
     if selected != "(none)":
         st.session_state.migration_id = labels[selected]
+    else:
+        st.session_state.migration_id = None
 
 
 def render_migration_picker() -> None:
