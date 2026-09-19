@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS date_column_escalations (
     FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE CASCADE,
     UNIQUE (migration_id, source_file_id, source_column)
 );
+
+CREATE TABLE IF NOT EXISTS duplicate_conflicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    migration_id INTEGER NOT NULL,
+    employee_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    rule_fired TEXT NOT NULL,
+    review_reason TEXT NOT NULL,
+    members_json TEXT NOT NULL,
+    differing_fields_json TEXT NOT NULL,
+    final_payload_json TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
 """
 
 

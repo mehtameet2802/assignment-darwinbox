@@ -24,7 +24,7 @@ def test_alias_mapper_spec_examples() -> None:
     assert resolve_alias("Work Email") == "email"
     assert resolve_alias("Dept") == "department"
     assert resolve_alias("Office") == "city"
-    assert resolve_alias("Employee Name") is None
+    assert resolve_alias("Employee Name") == "first_name"
 
 
 def test_type_inference_spec_examples() -> None:
