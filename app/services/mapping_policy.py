@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from app.services.compatibility import is_structurally_compatible
+from app.status import NEEDS_REVIEW
 
 CONFIDENCE_THRESHOLD = 0.85
 
 AUTO_APPROVED = "AUTO_APPROVED"
-NEEDS_REVIEW = "NEEDS_REVIEW"
 IGNORED = "IGNORED"
 MANUALLY_APPROVED = "MANUALLY_APPROVED"
 UNMAPPED = "UNMAPPED"

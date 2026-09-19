@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 
 from app.database import db_session, utcnow
-from app.services.ingestion import IngestionError, get_migration
+from app.errors import AppError
 from app.services.audit import HUMAN, SYSTEM, append_audit
+from app.services.migrations import require_migration
 from app.services.mock_target import delete_batch, receive_employee_on_connection
+from app.status import PUSH_FAILED, PUSHED, READY_TO_PUSH, ROLLED_BACK
 
-PUSHED = "PUSHED"
-PUSH_FAILED = "PUSH_FAILED"
-READY_TO_PUSH = "READY_TO_PUSH"
-ROLLED_BACK = "ROLLED_BACK"
 ENDPOINT = "/mock-target/employees"
 METHOD = "POST"
 
@@ -68,11 +66,11 @@ def _push_records(
     *,
     only_failed: bool,
 ) -> dict:
-    get_migration(migration_id)
     now = utcnow()
     status_filter = PUSH_FAILED if only_failed else READY_TO_PUSH
 
     with db_session() as connection:
+        require_migration(migration_id, connection)
         cursor = connection.execute(
             """
             INSERT INTO push_batches (migration_id, status, created_at)
@@ -181,8 +179,8 @@ def retry_failed_push(migration_id: int) -> dict:
 
 
 def rollback_latest_push(migration_id: int) -> dict:
-    get_migration(migration_id)
     with db_session() as connection:
+        require_migration(migration_id, connection)
         batch = connection.execute(
             """
             SELECT id, status FROM push_batches
@@ -193,7 +191,7 @@ def rollback_latest_push(migration_id: int) -> dict:
             (migration_id,),
         ).fetchone()
         if batch is None:
-            raise IngestionError("No completed push batch to rollback.", 404)
+            raise AppError("No completed push batch to rollback.", 404)
 
         batch_key = str(batch["id"])
         append_audit(connection, migration_id, HUMAN, "rollback requested", batch_key, "Rollback latest push batch")
@@ -240,8 +238,8 @@ def rollback_latest_push(migration_id: int) -> dict:
 
 
 def list_push_attempts(migration_id: int) -> dict:
-    get_migration(migration_id)
     with db_session() as connection:
+        require_migration(migration_id, connection)
         rows = connection.execute(
             """
             SELECT pa.*, pb.status AS batch_status

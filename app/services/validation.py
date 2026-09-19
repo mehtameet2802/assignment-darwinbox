@@ -6,16 +6,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.database import db_session, utcnow
+from app.errors import AppError
 from app.models.employee import EmployeeRecord
 from app.schema import EMPLOYEE_TARGET_SCHEMA
-from app.services.ingestion import IngestionError, get_migration
+from app.services.audit import HUMAN, SYSTEM, append_audit
+from app.services.migrations import require_migration
+from app.status import EXCLUDED, NEEDS_REVIEW, READY_TO_PUSH, RESOLVED, TRANSFORMED
 
 REQUIRED_VALUE_MISSING = "REQUIRED_VALUE_MISSING"
 VALIDATION_FAILURE = "VALIDATION_FAILURE"
-NEEDS_REVIEW = "NEEDS_REVIEW"
-READY_TO_PUSH = "READY_TO_PUSH"
-EXCLUDED = "EXCLUDED"
-RESOLVED = "RESOLVED"
 
 REQUIRED_FIELDS = [f["name"] for f in EMPLOYEE_TARGET_SCHEMA["fields"] if f["required"]]
 
@@ -51,13 +50,13 @@ def assess_record(payload: dict) -> dict:
 
 
 def validate_migration(migration_id: int) -> dict:
-    get_migration(migration_id)
     validated = 0
     escalated = 0
     ready = 0
     now = utcnow()
 
     with db_session() as connection:
+        require_migration(migration_id, connection)
         connection.execute(
             "DELETE FROM validation_escalations WHERE migration_id = ?",
             (migration_id,),
@@ -66,10 +65,10 @@ def validate_migration(migration_id: int) -> dict:
             """
             SELECT id, employee_id, payload_json, status
             FROM normalized_records
-            WHERE migration_id = ? AND status = 'TRANSFORMED'
+            WHERE migration_id = ? AND status = ?
             ORDER BY id
             """,
-            (migration_id,),
+            (migration_id, TRANSFORMED),
         ).fetchall()
 
         for row in rows:
@@ -89,8 +88,6 @@ def validate_migration(migration_id: int) -> dict:
                 "UPDATE normalized_records SET status = ? WHERE id = ?",
                 (NEEDS_REVIEW, row["id"]),
             )
-            from app.services.audit import SYSTEM, append_audit
-
             append_audit(
                 connection,
                 migration_id,
@@ -135,19 +132,17 @@ def validate_migration(migration_id: int) -> dict:
     }
 
 
-def list_validation_escalations(migration_id: int) -> dict:
-    get_migration(migration_id)
-    with db_session() as connection:
-        rows = connection.execute(
-            """
-            SELECT ve.*, rl.source_file, rl.source_row_number
-            FROM validation_escalations ve
-            LEFT JOIN record_lineage rl ON rl.normalized_record_id = ve.normalized_record_id
-            WHERE ve.migration_id = ?
-            ORDER BY ve.employee_id, ve.id
-            """,
-            (migration_id,),
-        ).fetchall()
+def list_validation_escalations_from_connection(connection, migration_id: int) -> dict:
+    rows = connection.execute(
+        """
+        SELECT ve.*, rl.source_file, rl.source_row_number
+        FROM validation_escalations ve
+        LEFT JOIN record_lineage rl ON rl.normalized_record_id = ve.normalized_record_id
+        WHERE ve.migration_id = ?
+        ORDER BY ve.employee_id, ve.id
+        """,
+        (migration_id,),
+    ).fetchall()
 
     grouped: dict[int, dict] = {}
     for row in rows:
@@ -181,6 +176,12 @@ def list_validation_escalations(migration_id: int) -> dict:
     }
 
 
+def list_validation_escalations(migration_id: int) -> dict:
+    with db_session() as connection:
+        require_migration(migration_id, connection)
+        return list_validation_escalations_from_connection(connection, migration_id)
+
+
 def resolve_validation_escalation(
     migration_id: int,
     escalation_id: int,
@@ -190,7 +191,7 @@ def resolve_validation_escalation(
     value: str | None = None,
 ) -> dict:
     if action not in {"enter_value", "exclude"}:
-        raise IngestionError("action must be 'enter_value' or 'exclude'.", 400)
+        raise AppError("action must be 'enter_value' or 'exclude'.", 400)
 
     with db_session() as connection:
         row = connection.execute(
@@ -201,11 +202,9 @@ def resolve_validation_escalation(
             (escalation_id, migration_id),
         ).fetchone()
         if row is None:
-            raise IngestionError("Validation escalation not found.", 404)
+            raise AppError("Validation escalation not found.", 404)
 
         record_id = row["normalized_record_id"]
-        from app.services.audit import HUMAN, append_audit
-
         if action == "exclude":
             append_audit(
                 connection,
@@ -229,7 +228,7 @@ def resolve_validation_escalation(
             field_name = row["field_name"]
         payload = json.loads(row["current_payload_json"])
         if value is None:
-            raise IngestionError("value is required for enter_value.", 400)
+            raise AppError("value is required for enter_value.", 400)
         payload[field_name] = value
         result = assess_record(payload)
         if result["status"] != READY_TO_PUSH:

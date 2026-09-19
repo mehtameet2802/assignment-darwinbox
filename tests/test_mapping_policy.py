@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
 from app.services.compatibility import is_structurally_compatible
@@ -13,9 +14,8 @@ from app.services.mapping_policy import (
     NEEDS_REVIEW,
     RULE_CONFIDENCE,
     RULE_STRUCTURAL,
-    evaluate_mapping_policy
+    evaluate_mapping_policy,
 )
-from flask_app import create_app
 
 
 def test_structural_doj_to_employee_id_fails() -> None:

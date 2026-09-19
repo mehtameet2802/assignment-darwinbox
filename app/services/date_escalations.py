@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 
 from app.database import db_session, utcnow
-from app.services.dates import DATE_FORMAT_AMBIGUITY, FORMAT_DMY, FORMAT_MDY, analyze_date_column
-from app.services.ingestion import IngestionError, get_migration
-from app.services.mapping_store import list_mappings
+from app.errors import AppError
+from app.services.audit import HUMAN, append_audit
+from app.services.dates import FORMAT_DMY, FORMAT_MDY, analyze_date_column
+from app.services.mapping_store import list_mappings_from_connection
+from app.services.migrations import require_migration
+from app.status import NEEDS_REVIEW, RESOLVED
 
 
 def _row_to_escalation(row) -> dict:
@@ -43,19 +46,18 @@ def _collect_column_values(migration_id: int, source_file_id: int, source_column
 
 
 def scan_date_columns(migration_id: int) -> dict:
-    get_migration(migration_id)
-    mappings = list_mappings(migration_id)["mappings"]
-    date_mappings = [
-        m
-        for m in mappings
-        if not m["ignored"] and m.get("final_target") == "joining_date"
-    ]
-    if not date_mappings:
-        raise IngestionError("No mapped joining_date columns to analyze.", 400)
-
-    now = utcnow()
-    escalations: list[dict] = []
     with db_session() as connection:
+        require_migration(migration_id, connection)
+        mappings = list_mappings_from_connection(connection, migration_id)["mappings"]
+        date_mappings = [
+            m
+            for m in mappings
+            if not m["ignored"] and m.get("final_target") == "joining_date"
+        ]
+        if not date_mappings:
+            raise AppError("No mapped joining_date columns to analyze.", 400)
+
+        now = utcnow()
         for mapping in date_mappings:
             values = _collect_column_values(
                 migration_id,
@@ -63,7 +65,7 @@ def scan_date_columns(migration_id: int) -> dict:
                 mapping["source_column"],
             )
             analysis = analyze_date_column(values)
-            status = "NEEDS_REVIEW" if analysis["ambiguous"] else "RESOLVED"
+            status = NEEDS_REVIEW if analysis["ambiguous"] else RESOLVED
             chosen = analysis["chosen_format"]
             issue_type = analysis["issue_type"] or "AUTO_RESOLVED"
             connection.execute(
@@ -96,16 +98,20 @@ def scan_date_columns(migration_id: int) -> dict:
                     now,
                 ),
             )
-        rows = connection.execute(
-            """
-            SELECT * FROM date_column_escalations
-            WHERE migration_id = ?
-            ORDER BY source_file, source_column
-            """,
-            (migration_id,),
-        ).fetchall()
+        return list_date_escalations_from_connection(connection, migration_id)
+
+
+def list_date_escalations_from_connection(connection, migration_id: int) -> dict:
+    rows = connection.execute(
+        """
+        SELECT * FROM date_column_escalations
+        WHERE migration_id = ?
+        ORDER BY source_file, source_column
+        """,
+        (migration_id,),
+    ).fetchall()
     escalations = [_row_to_escalation(row) for row in rows]
-    blocking = sum(1 for item in escalations if item["status"] == "NEEDS_REVIEW")
+    blocking = sum(1 for item in escalations if item["status"] == NEEDS_REVIEW)
     return {
         "migration_id": migration_id,
         "escalation_count": len(escalations),
@@ -115,29 +121,14 @@ def scan_date_columns(migration_id: int) -> dict:
 
 
 def list_date_escalations(migration_id: int) -> dict:
-    get_migration(migration_id)
     with db_session() as connection:
-        rows = connection.execute(
-            """
-            SELECT * FROM date_column_escalations
-            WHERE migration_id = ?
-            ORDER BY source_file, source_column
-            """,
-            (migration_id,),
-        ).fetchall()
-    escalations = [_row_to_escalation(row) for row in rows]
-    blocking = sum(1 for item in escalations if item["status"] == "NEEDS_REVIEW")
-    return {
-        "migration_id": migration_id,
-        "escalation_count": len(escalations),
-        "blocking_count": blocking,
-        "escalations": escalations,
-    }
+        require_migration(migration_id, connection)
+        return list_date_escalations_from_connection(connection, migration_id)
 
 
 def resolve_date_escalation(migration_id: int, escalation_id: int, chosen_format: str) -> dict:
     if chosen_format not in {FORMAT_DMY, FORMAT_MDY}:
-        raise IngestionError("chosen_format must be DD/MM/YYYY or MM/DD/YYYY.", 400)
+        raise AppError("chosen_format must be DD/MM/YYYY or MM/DD/YYYY.", 400)
     with db_session() as connection:
         row = connection.execute(
             """
@@ -147,19 +138,28 @@ def resolve_date_escalation(migration_id: int, escalation_id: int, chosen_format
             (escalation_id, migration_id),
         ).fetchone()
         if row is None:
-            raise IngestionError("Date escalation not found.", 404)
+            raise AppError("Date escalation not found.", 404)
         connection.execute(
             """
             UPDATE date_column_escalations
-            SET status = 'RESOLVED', chosen_format = ?, review_reason = ?, updated_at = ?
+            SET status = ?, chosen_format = ?, review_reason = ?, updated_at = ?
             WHERE id = ?
             """,
             (
+                RESOLVED,
                 chosen_format,
                 f"Human selected {chosen_format} for this column.",
                 utcnow(),
                 escalation_id,
             ),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            HUMAN,
+            "human correction",
+            row["source_column"],
+            f"Set {chosen_format} for {row['source_file']} column '{row['source_column']}'",
         )
         updated = connection.execute(
             "SELECT * FROM date_column_escalations WHERE id = ?",
@@ -182,6 +182,6 @@ def get_column_date_format(
             """,
             (migration_id, source_file_id, source_column),
         ).fetchone()
-    if row is None or row["status"] != "RESOLVED":
+    if row is None or row["status"] != RESOLVED:
         return None
     return row["chosen_format"]

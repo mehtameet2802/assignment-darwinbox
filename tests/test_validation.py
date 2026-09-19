@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
-from app.services.validation import REQUIRED_VALUE_MISSING, VALIDATION_FAILURE, list_validation_escalations
-from flask_app import create_app
+from app.services.validation import (
+    REQUIRED_VALUE_MISSING,
+    VALIDATION_FAILURE,
+    list_validation_escalations,
+)
 from tests.test_duplicates import _run_demo_pipeline
 
 

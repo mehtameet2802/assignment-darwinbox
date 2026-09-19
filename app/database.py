@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import DATABASE_PATH, UPLOAD_DIR
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS push_attempts (
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def ensure_directories() -> None:

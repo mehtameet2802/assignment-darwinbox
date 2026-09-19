@@ -4,11 +4,11 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from flask_app import create_app
 
 from app.config import DEMO_DIR, PROJECT_ROOT
 from app.database import init_db
 from app.services.ingestion import attach_lineage, find_source_rows
-from flask_app import create_app
 
 
 @pytest.fixture

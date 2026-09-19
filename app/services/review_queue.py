@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from app.services.date_escalations import list_date_escalations
-from app.services.duplicates import list_duplicate_conflicts
-from app.services.ingestion import get_migration
-from app.services.mapping_store import list_mappings
-from app.services.validation import list_validation_escalations
+from app.database import db_session
+from app.services.date_escalations import list_date_escalations_from_connection
+from app.services.duplicates import list_duplicate_conflicts_from_connection
+from app.services.mapping_store import list_mappings_from_connection
+from app.services.migrations import require_migration
+from app.services.validation import list_validation_escalations_from_connection
+from app.status import NEEDS_REVIEW
 
 
 def get_unified_review_queue(migration_id: int) -> dict:
-    get_migration(migration_id)
-    mappings = list_mappings(migration_id)
-    dates = list_date_escalations(migration_id)
-    duplicates = list_duplicate_conflicts(migration_id)
-    validation = list_validation_escalations(migration_id)
+    with db_session() as connection:
+        require_migration(migration_id, connection)
+        mappings = list_mappings_from_connection(connection, migration_id)
+        dates = list_date_escalations_from_connection(connection, migration_id)
+        duplicates = list_duplicate_conflicts_from_connection(connection, migration_id)
+        validation = list_validation_escalations_from_connection(connection, migration_id)
 
     items: list[dict] = []
 
@@ -32,7 +35,7 @@ def get_unified_review_queue(migration_id: int) -> dict:
             )
 
     for escalation in dates["escalations"]:
-        if escalation["status"] == "NEEDS_REVIEW":
+        if escalation["status"] == NEEDS_REVIEW:
             items.append(
                 {
                     "category": "DATE_FORMAT_AMBIGUITY",
@@ -47,7 +50,7 @@ def get_unified_review_queue(migration_id: int) -> dict:
             )
 
     for conflict in duplicates["conflicts"]:
-        if conflict["status"] == "NEEDS_REVIEW":
+        if conflict["status"] == NEEDS_REVIEW:
             items.append(
                 {
                     "category": "DUPLICATE_CONFLICT",
@@ -61,7 +64,7 @@ def get_unified_review_queue(migration_id: int) -> dict:
             )
 
     for escalation in validation["escalations"]:
-        if escalation["status"] == "NEEDS_REVIEW":
+        if escalation["status"] == NEEDS_REVIEW:
             items.append(
                 {
                     "category": escalation["issue_type"],

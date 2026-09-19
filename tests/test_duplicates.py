@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
 from app.services.duplicates import list_duplicate_conflicts
-from flask_app import create_app
 
 
 def _ollama_side_effect(column, source_type, samples):

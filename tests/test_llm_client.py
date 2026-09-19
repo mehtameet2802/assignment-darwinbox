@@ -4,18 +4,17 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
 from app.services.llm_client import LLMClient, normalize_mapping_result, parse_mapping_json
-from app.services.source_analysis import analyze_migration
-from flask_app import create_app
 
 
 def test_parse_mapping_json_from_plain_and_embedded() -> None:
     payload = '{"target_field":"joining_date","confidence":0.96,"reason":"ok","alternatives":[]}'
     assert parse_mapping_json(payload)["target_field"] == "joining_date"
     wrapped = f"Here is the result:\n```json\n{payload}\n```"
-    # brace extraction should still work without fences in our simple parser - use embedded
+    assert parse_mapping_json(wrapped)["target_field"] == "joining_date"
     embedded = f"noise {payload} trailing"
     assert parse_mapping_json(embedded)["confidence"] == 0.96
     assert parse_mapping_json("not json at all") is None

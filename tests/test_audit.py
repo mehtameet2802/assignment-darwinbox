@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
+from flask_app import create_app
 
 from app.database import init_db
-from flask_app import create_app
 from tests.test_push import _prepare_ready_records
 
 
@@ -28,7 +29,9 @@ def test_demo_path_writes_audit_entries(client) -> None:
     client.post(f"/api/migrations/{migration_id}/push")
     client.post(f"/api/migrations/{migration_id}/push/retry")
 
-    log = client.get(f"/api/migrations/{migration_id}/audit-log").get_json()
+    log = client.get(
+        f"/api/migrations/{migration_id}/audit-log?limit=500&offset=0"
+    ).get_json()
     actions = {entry["action"] for entry in log["entries"]}
     assert "migration created" in actions
     assert "file uploaded" in actions
@@ -38,3 +41,22 @@ def test_demo_path_writes_audit_entries(client) -> None:
     assert "push failed" in actions
     assert "push succeeded" in actions
     assert "retry requested" in actions
+
+
+def test_audit_log_pagination(client) -> None:
+    created = client.post("/api/migrations", json={"name": "Paged audit"})
+    migration_id = created.get_json()["id"]
+
+    first = client.get(
+        f"/api/migrations/{migration_id}/audit-log?limit=10&offset=0"
+    ).get_json()
+    assert first["limit"] == 10
+    assert first["offset"] == 0
+    assert first["total"] == 1
+    assert len(first["entries"]) == 1
+
+    beyond = client.get(
+        f"/api/migrations/{migration_id}/audit-log?limit=10&offset=10"
+    ).get_json()
+    assert beyond["total"] == 1
+    assert beyond["entries"] == []
