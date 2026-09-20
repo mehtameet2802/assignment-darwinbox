@@ -95,7 +95,17 @@ Rollback is deliberately batch-scoped: it removes only records that the latest p
 
 ## Demo recording
 
-Follow [docs/DEMO_RECORDING.md](docs/DEMO_RECORDING.md) for a single take-home video covering autonomous reconciliation, one human escalation, E009 failure, rollback, selective re-push, retry, and the final audit trail.
+Walkthrough (~9 minutes): [demo recording on Google Drive](https://drive.google.com/file/d/1tfx7yOt6u99nDotkhxjVmFTs_SezDZHU/view?usp=sharing)
+
+The recording uses a fresh database, the four `data/demo/` files, and Ollama. It shows autonomous reconciliation, human escalation (ambiguous dates), E009 failing on first push, batch rollback, re-push of ready records, retry success, and the audit log.
+
+## Source lineage
+
+Reconciled employees keep references to **every** contributing source row (filename and row number). Exact-deduped `E001` and human-resolved `E002` both expose both origins in the UI and audit trail.
+
+## Known limitations
+
+Deliberate MVP cuts: no schema versioning, no production authentication, no generic transformation engine, no multi-entity support, no advanced fuzzy deduplication, no production-scale observability, and no persistent multi-batch history UI.
 
 ## Running tests
 

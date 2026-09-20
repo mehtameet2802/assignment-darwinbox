@@ -8,7 +8,7 @@
 | **Runtime** | [Ollama](https://ollama.com) (local) |
 | **Role** | Semantic **column → target field** proposals only |
 
-The application — not the model — decides auto-accept vs human review (Phase 5+: confidence threshold, structural compatibility, validation). Deterministic **aliases** run before Ollama.
+The application — not the model — decides auto-accept vs human review (Phase 5+: confidence threshold, structural compatibility, validation). Column mapping tries **Ollama first** when semantic generation is enabled; deterministic **aliases** are a fallback when Ollama is off, fails, or returns no usable target (`source_analysis._apply_column_mapping`).
 
 ### Why this model
 
