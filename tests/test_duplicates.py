@@ -45,12 +45,23 @@ def _ollama_side_effect(column, source_type, samples):
     }
 
 
+def _resolve_blocking_date_escalations(client, migration_id: int) -> None:
+    listed = client.get(f"/api/migrations/{migration_id}/date-escalations").get_json()
+    for esc in listed.get("escalations", []):
+        if esc.get("status") == "NEEDS_REVIEW":
+            client.patch(
+                f"/api/migrations/{migration_id}/date-escalations/{esc['id']}",
+                json={"chosen_format": "DD/MM/YYYY"},
+            )
+
+
 def _run_demo_pipeline(client, migration_id: int) -> None:
     with patch("app.services.llm_client.LLMClient.infer_mapping", side_effect=_ollama_side_effect):
         gen = client.post(f"/api/migrations/{migration_id}/mappings/generate?include_semantic=true")
         assert gen.status_code == 201
     scan = client.post(f"/api/migrations/{migration_id}/date-columns/scan")
     assert scan.status_code == 201
+    _resolve_blocking_date_escalations(client, migration_id)
     transform = client.post(f"/api/migrations/{migration_id}/transform")
     assert transform.status_code == 201
     analyze = client.post(f"/api/migrations/{migration_id}/duplicates/analyze")

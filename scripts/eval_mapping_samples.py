@@ -48,6 +48,9 @@ GOLDEN_CASES: list[dict[str, Any]] = [
     },
 ]
 
+# MVP smoke-test gate: with four cases, 75% requires at least three to pass.
+# One miss is tolerated because suggestions still go through human review; two or
+# more misses indicate that the model or prompt is not dependable enough to lock in.
 PASS_THRESHOLD = 0.75
 
 

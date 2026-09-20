@@ -1,16 +1,91 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from collections import defaultdict
 
 from app.database import db_session, utcnow
 from app.errors import AppError
 from app.schema import EMPLOYEE_TARGET_SCHEMA
 from app.services.audit import AGENT, HUMAN, append_audit
-from app.services.mapping_policy import evaluate_mapping_policy
+from app.services.mapping_policy import (
+    AUTO_APPROVED,
+    RULE_TARGET_FIELD_COLLISION,
+    evaluate_mapping_policy,
+)
 from app.services.migrations import require_migration
 from app.services.source_analysis import _summarize_columns, analyze_migration
+from app.status import NEEDS_REVIEW
 
 TARGET_FIELD_NAMES = [field["name"] for field in EMPLOYEE_TARGET_SCHEMA["fields"]]
+
+
+def refresh_target_field_collisions(connection: sqlite3.Connection, migration_id: int) -> int:
+    """Flag mappings where multiple columns in one file map to the same target field."""
+    rows = connection.execute(
+        """
+        SELECT id, source_file_id, source_file, source_column, detected_source_type,
+               proposed_target, confidence, final_target, ignored, review_rule_fired
+        FROM column_mappings
+        WHERE migration_id = ? AND ignored = 0 AND final_target IS NOT NULL
+        """,
+        (migration_id,),
+    ).fetchall()
+    groups: dict[tuple[int, str], list] = defaultdict(list)
+    for row in rows:
+        groups[(row["source_file_id"], row["final_target"])].append(row)
+
+    collision_ids: set[int] = set()
+    for members in groups.values():
+        if len(members) > 1:
+            for row in members:
+                collision_ids.add(row["id"])
+
+    now = utcnow()
+    for row in rows:
+        if row["id"] in collision_ids:
+            columns = [
+                other["source_column"]
+                for other in groups[(row["source_file_id"], row["final_target"])]
+            ]
+            reason = (
+                f"Columns {', '.join(columns)} in {row['source_file']} all map to "
+                f"'{row['final_target']}'. Resolve the collision before transforming."
+            )
+            connection.execute(
+                """
+                UPDATE column_mappings
+                SET status = ?, review_required = 1,
+                    review_rule_fired = ?, review_reason = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (NEEDS_REVIEW, RULE_TARGET_FIELD_COLLISION, reason, now, row["id"]),
+            )
+            continue
+        if row["review_rule_fired"] == RULE_TARGET_FIELD_COLLISION:
+            policy = evaluate_mapping_policy(
+                source_type=row["detected_source_type"],
+                proposed_target=row["proposed_target"],
+                confidence=row["confidence"],
+                manual_target=row["final_target"],
+            )
+            connection.execute(
+                """
+                UPDATE column_mappings
+                SET status = ?, review_required = ?,
+                    review_rule_fired = ?, review_reason = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    policy["status"],
+                    1 if policy["review_required"] else 0,
+                    policy["review_rule_fired"],
+                    policy["review_reason"],
+                    now,
+                    row["id"],
+                ),
+            )
+    return len(collision_ids)
 
 
 def _row_to_mapping(row) -> dict:
@@ -78,10 +153,46 @@ def generate_mappings(migration_id: int, include_semantic: bool = True) -> dict:
                     now,
                 ),
             )
+            entity = f"{column['source_file']}:{column['source_column']}"
+            method = column.get("mapping_method") or "unmapped"
+            confidence = column.get("confidence")
+            conf_text = f"{confidence:.2f}" if confidence is not None else "n/a"
+            if policy["review_required"]:
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "mapping review required",
+                    entity,
+                    policy["review_reason"]
+                    or f"Review required for '{column['source_column']}'.",
+                )
+            elif policy["status"] == AUTO_APPROVED and policy["final_target"]:
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "mapping auto-approved",
+                    entity,
+                    (
+                        f"Mapped to '{policy['final_target']}' via {method} "
+                        f"(confidence {conf_text})."
+                    ),
+                )
         connection.execute(
             "UPDATE migrations SET status = 'MAPPINGS_GENERATED' WHERE id = ?",
             (migration_id,),
         )
+        collision_count = refresh_target_field_collisions(connection, migration_id)
+        if collision_count:
+            append_audit(
+                connection,
+                migration_id,
+                AGENT,
+                "mapping collision detected",
+                "employees",
+                f"{collision_count} mapping(s) blocked by TARGET_FIELD_COLLISION",
+            )
         append_audit(
             connection,
             migration_id,
@@ -199,4 +310,5 @@ def update_mapping(migration_id: int, mapping_id: int, action: str, target_field
                 row["source_column"],
                 f"Mapped {row['source_file']} '{row['source_column']}' to '{target_field}'",
             )
+        refresh_target_field_collisions(connection, migration_id)
     return _row_to_mapping(updated)

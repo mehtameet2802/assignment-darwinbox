@@ -1,16 +1,20 @@
-Yes — these are good additions. I’d make all three changes now: explicit multi-row lineage, a precedence note between §2.1 and §5, and an operating-discipline prompt that travels with the spec.
-
 # Darwinbox Forward Deployed Engineer — Master Implementation Specification
 
 > **Purpose of this document**
 >
-> This is the single source of truth for Cursor and any other AI coding agent working on this take-home assignment.
+> This document records the product scope, invariants, acceptance behavior, and implementation plan used for the take-home assignment.
 >
-> Agents must read this document before writing code.
+> **Current status:** Tier 1 and selected post-Tier-1 improvements are implemented. The repository and automated tests provide implementation evidence; this specification remains authoritative for product intent and safety invariants.
 >
-> Do not reinterpret decisions that are already settled here.
+> The panel-facing summary is [docs/APPROACH.md](docs/APPROACH.md). This longer document is retained as the detailed engineering reference.
 >
 > The implementation is intentionally scoped for a **small, complete, defensible MVP** rather than a broad migration platform.
+
+## How this specification was developed
+
+The assignment brief and the project owner's decisions set the direction: employee-only scope, a fixed target schema, the autonomy boundary, and the recovery workflow. AI coding agents were used as collaborators to challenge edge cases, propose implementation options, write and revise code, and expand automated tests. The project owner reviewed those suggestions and made the final scope and policy decisions.
+
+The result is a human-owned engineering record developed with AI assistance. If the prose and executable behavior ever disagree, the discrepancy must be resolved explicitly and covered by a test rather than silently treating either one as correct.
 
 ---
 
@@ -58,7 +62,7 @@ The MVP must make that boundary visible in the UI.
 
 ## 2.1 BUILD THIS — Tier 1
 
-Build Tier 1 completely before doing any Tier 2 work.
+Build Tier 1 completely before adding optional enhancements.
 
 ### 1. Project bootstrap
 
@@ -177,7 +181,7 @@ The schema should be shown in the UI, including on Settings / migration setup.
 
 Tier 1 does not need full schema editing.
 
-Tier 2 may add basic field editing.
+A future enhancement may add basic field editing.
 
 ---
 
@@ -300,19 +304,28 @@ The application, not the AI, decides whether review is required.
 Exact threshold:
 
 ```text
-confidence >= 0.85
+confidence >= 0.80
 → eligible for automatic acceptance
 
-confidence < 0.85
+confidence < 0.80
 → human review required
 ```
+
+Why `0.80`:
+
+- it is a pragmatic MVP operating point, not a calibrated probability of correctness;
+- lower-confidence semantic proposals should stop for review, while clear proposals should not require confirmation for every field;
+- reaching `0.80` only makes a proposal eligible for auto-approval—structural compatibility and collision checks still have veto power;
+- production calibration would require representative client mappings and a measured cost for false approvals.
+
+Do not confuse this per-proposal cutoff with the separate `75%` four-case Ollama smoke-test pass rate.
 
 The LLM must not control `needs_human_review`.
 
 Conceptually:
 
 ```python
-needs_human_review = confidence < 0.85
+needs_human_review = confidence < 0.80
 ```
 
 but structural compatibility also participates in the decision.
@@ -383,7 +396,7 @@ For Tier 1, the mapping decision must follow this policy:
 
 ```text
 review_required =
-    confidence < 0.85
+    confidence < 0.80
     OR structural_compatibility_failed
     OR mapping cannot be produced safely
 ```
@@ -394,7 +407,7 @@ Examples:
 
 ```text
 Needs review:
-Confidence 0.54 < required threshold 0.85
+Confidence 0.54 < required threshold 0.80
 ```
 
 or:
@@ -1118,6 +1131,16 @@ DELETE /mock-target/batches/<batch_id>
 
 Rollback removes records created by that push batch.
 
+Rollback is batch-scoped, not a migration reset:
+
+- only successful writes from the selected batch exist in the target and can be removed;
+- removed rows return from `PUSHED` to `READY_TO_PUSH`;
+- rows already in `PUSH_FAILED` remain failed because they never reached the target;
+- the response reports removed, returned-to-ready, and unchanged-failed counts plus the post-operation state;
+- the UI distinguishes the latest operation from migration-wide state.
+
+If rollback produces both `READY_TO_PUSH` and `PUSH_FAILED` rows, show a mixed `ready_and_failed` workflow state and keep migration completion disabled.
+
 Audit:
 
 ```text
@@ -1244,13 +1267,13 @@ The exact click-through sequence is defined in the Deliverables section.
 
 ---
 
-## 2.2 BUILD ONLY IF TIER 1 IS DONE — Tier 2
+## 2.2 Post-Tier-1 enhancements
 
-Do Tier 2 only after Tier 1 works end-to-end and is stable.
+These items were considered only after Tier 1 worked end to end. Focused tests, the predefined Full Name split, and targeted Streamlit polish are implemented. Basic schema editing remains deferred.
 
-### 1. Focused pytest suite
+### 1. Focused pytest suite — implemented
 
-Add at least these tests:
+Implemented coverage includes:
 
 1. date ambiguity detection
 2. duplicate conflict classification
@@ -1263,7 +1286,7 @@ Do not build a huge test suite at the expense of a working demo.
 
 ---
 
-### 2. Full Name split
+### 2. Full Name split — implemented
 
 Support:
 
@@ -1312,7 +1335,7 @@ last_name optional
 
 Madonna remains valid.
 
-If Tier-2 schema editing changes `last_name` to required:
+If deferred schema editing later makes `last_name` required:
 
 ```text
 Madonna
@@ -1415,7 +1438,7 @@ Reason: a plain chronological audit table already satisfies the auditability sig
 
 Reason: unnecessary persistence complexity for this take-home.
 
-Use only the minimal storage needed by Tier 1/Tier 2.
+Use only the minimal storage needed by the MVP and supported enhancements.
 
 ---
 
@@ -1511,7 +1534,7 @@ first_name + last_name → full_name
 
 unless future work explicitly adds it.
 
-Tier 2 Full Name split is the opposite direction and is a single predefined transformation.
+The implemented Full Name split is the opposite direction and is a single predefined transformation.
 
 ---
 
@@ -1567,7 +1590,7 @@ Do not introduce LangGraph.
 
 # 4. Repository Structure
 
-Use a small structure matching Tier 1/Tier 2.
+Use a small structure matching the MVP and supported enhancements.
 
 ```text
 darwinbox-migration-agent/
@@ -1782,16 +1805,16 @@ human mapping review
 Exact threshold:
 
 ```text
-0.85
+0.80
 ```
 
 Rule:
 
 ```text
-confidence >= 0.85 AND structurally compatible
+confidence >= 0.80 AND structurally compatible
 → auto-approved
 
-confidence < 0.85
+confidence < 0.80
 → review
 
 structurally incompatible
@@ -1816,7 +1839,7 @@ Date → joining_date
 confidence = 0.54
 
 → review
-Reason: confidence 0.54 < 0.85
+Reason: confidence 0.54 < 0.80
 ```
 
 Example C:
@@ -2098,7 +2121,7 @@ Good:
 Needs review
 
 Rule:
-Confidence 0.54 is below automatic-acceptance threshold 0.85.
+Confidence 0.54 is below automatic-acceptance threshold 0.80.
 ```
 
 Good:
@@ -2280,7 +2303,7 @@ Example:
 
 ```text
 10:34 AGENT  Mapping generated     DOJ         DOJ → joining_date, confidence 0.96
-10:34 SYSTEM Mapping auto-approved DOJ         confidence >= 0.85 and compatible
+10:34 SYSTEM Mapping auto-approved DOJ         confidence >= 0.80 and compatible
 10:39 SYSTEM Duplicate escalated   E002        same employee_id, different email
 10:44 HUMAN  Duplicate resolved    E002        selected ravi.work@example.com
 10:51 SYSTEM Push failed           E009        HTTP 500
@@ -2388,7 +2411,7 @@ Expected behavior:
 ```text
 Date
 → semantically ambiguous source header
-→ DD/MM vs MM/DD ambiguity may also require one column-level review
+→ column auto-resolves to DD/MM/YYYY because row E011 includes `13/09/2024` (day > 12)
 ```
 
 ```text
@@ -2410,13 +2433,35 @@ E011
 → REQUIRED_VALUE_MISSING
 ```
 
+## 6.4 `employees_ambiguous_dates.csv`
+
+Columns match `employees_extra.csv`.
+
+Rows:
+
+```text
+E012,Karan Mehta,03/04/2024,karan@example.com,Engineering,Mumbai
+E013,Sneha Iyer,05/06/2024,sneha@example.com,Finance,Pune
+E014,Arjun Nair,07/08/2024,arjun@example.com,Product,Bengaluru
+```
+
+Expected behavior:
+
+```text
+Date
+→ all three values are valid as both DD/MM/YYYY and MM/DD/YYYY
+→ one DATE_FORMAT_AMBIGUITY escalation is created for the column
+→ a model suggestion may be displayed but cannot resolve the escalation
+→ transformation remains blocked until a human chooses the format
+```
+
 ---
 
-# 7. Tier-2 Exact Behavior
+# 7. Post-Tier-1 Enhancement Behavior
 
-## 7.1 Full Name Split
+## 7.1 Full Name Split — implemented
 
-If implemented:
+Implemented behavior:
 
 ```text
 Meet Mehta
@@ -2437,9 +2482,9 @@ Do not infer cultural naming semantics beyond this simple rule.
 
 ---
 
-## 7.2 Basic Schema Editing
+## 7.2 Basic Schema Editing — deferred
 
-If implemented:
+If later implemented:
 
 Settings must permit editing:
 
@@ -2477,19 +2522,21 @@ The LLM does not decide whether it may auto-approve itself.
 
 ---
 
-## Invariant 2 — Confidence threshold is exactly 0.85
+## Invariant 2 — The current MVP confidence cutoff is 0.80
 
 ```text
->= 0.85
+>= 0.80
 ```
 
 may auto-approve only when structurally compatible.
 
 ```text
-< 0.85
+< 0.80
 ```
 
 requires review.
+
+This is a human-owned product-policy cutoff, not a claim that model confidence is statistically calibrated.
 
 ---
 
@@ -2688,11 +2735,11 @@ Exact pytest command.
 
 ### Demo Data
 
-Explain the three files.
+Explain the four files and their combined 16 source rows.
 
 ### Demo Scenario
 
-Explain what E001/E002/E009/E010/E011 demonstrate.
+Explain what E001/E002/E009/E010/E011 and the E012–E014 date column demonstrate.
 
 ### Autonomy Boundary
 
@@ -2728,6 +2775,8 @@ This turns scope cuts into conscious engineering decisions rather than apparent 
 
 Maximum one page.
 
+Current artifact: [docs/APPROACH.md](docs/APPROACH.md).
+
 Use this exact structure.
 
 ### 1. Approach
@@ -2748,7 +2797,7 @@ State precisely:
 AI proposes a mapping with confidence/reason.
 
 Application code decides whether review is required using:
-- confidence threshold 0.85
+- confidence threshold 0.80
 - structural compatibility
 - duplicate conflict detection
 - required-value validation
@@ -2850,6 +2899,7 @@ Upload:
 employees_legacy.csv
 employee_master.xlsx
 employees_extra.csv
+employees_ambiguous_dates.csv
 ```
 
 ---
@@ -2888,27 +2938,11 @@ DOJ → joining_date
 
 ### Step 5
 
-Resolve one ambiguous mapping or date-format decision.
+Show that `employees_extra.csv` auto-resolves to DD/MM/YYYY because `13/09/2024` supplies deterministic evidence, while `employees_ambiguous_dates.csv` remains blocked because every date is dual-parse.
 
-Preferred required escalation moment:
+Choose DD/MM/YYYY for `employees_ambiguous_dates.csv` and continue. A model suggestion may be displayed but must never resolve this ambiguity automatically.
 
-```text
-Date
-03/04/2024
-05/06/2024
-07/08/2024
-```
-
-Show the exact rule:
-
-```text
-confidence below 0.85
-and/or date format ambiguous
-```
-
-Human chooses the appropriate mapping/format.
-
-This already satisfies the assignment requirement to show a human resolving an escalation through the UI.
+This is the first required human escalation in the recording and demonstrates the date-autonomy boundary.
 
 ---
 
@@ -2986,6 +3020,8 @@ Show remaining records ready for push.
 
 Push them to the mock target.
 
+Expected prepared demo state after resolving ambiguous dates, `E002`, correcting `E011`, and excluding `E010`: 13 ready records.
+
 ---
 
 ### Step 10
@@ -2996,31 +3032,32 @@ Show E009 target failure.
 HTTP 500
 ```
 
-Show per-record failure.
+Show the per-record failure and migration-wide state: 12 pushed, 1 failed, 12 in target.
 
 ---
 
 ### Step 11
 
-Click Retry.
+Click **Roll back latest batch**. Explain that only the 12 successful target writes are removed; E009 remains failed because it never existed in the target.
 
-E009:
+Show the mixed state:
 
 ```text
-HTTP 201
+12 ready
+0 pushed
+1 failed (E009)
+0 in target
 ```
-
-Show that only failed E009 was retried.
 
 ---
 
 ### Step 12
 
-Show rollback control.
+Click **Push ready records (12)**. Show that this operation attempts only the 12 returned rows and that E009 remains visible in the migration-wide failed state.
 
-If stable and fast enough, demonstrate it.
+Then click **Retry failed records (1)**. Show E009 succeeding with HTTP 201 on attempt 2 and the final 13 pushed / 0 failed / 13 in target state.
 
-If demonstrating rollback would make the recording unnecessarily long, at minimum show that the action exists and explain it in README/write-up.
+This sequence demonstrates both recovery actions without resending the wrong status group.
 
 ---
 
@@ -3039,6 +3076,9 @@ duplicate conflict resolved
 validation issue resolved
 push attempted
 E009 failed
+rollback requested
+rollback completed
+ready rows pushed again
 retry requested
 E009 succeeded
 ```
@@ -3051,7 +3091,7 @@ Do not let testing become larger than the product.
 
 Tier 1 first.
 
-If stable early, implement Tier-2 tests.
+After Tier 1 is stable, implement the focused tests listed below.
 
 ## Test 1 — Date ambiguity
 
@@ -3299,7 +3339,7 @@ Do not add AI.
 
 ### Checkpoint
 
-Upload all three demo files.
+Upload all four demo files.
 
 Verify:
 
@@ -3357,7 +3397,7 @@ Commit.
 Implement separately from AI call:
 
 ```text
-0.85 confidence threshold
+0.80 confidence threshold
 structural compatibility
 review reason
 ```
@@ -3515,6 +3555,8 @@ Implement:
 - per-record result
 - retry failed only
 - rollback current push batch
+- preserve earlier failed rows across rollback
+- expose mixed ready/failed post-rollback state
 
 ### Checkpoint
 
@@ -3525,6 +3567,8 @@ E009 first attempt → 500
 retry → 201
 successful records not resent
 rollback removes batch-created records
+rollback returns successful rows to READY_TO_PUSH and leaves failed rows PUSH_FAILED
+push → rollback → re-push ready → retry failed reaches a complete target without duplicates
 ```
 
 Commit.
@@ -3545,16 +3589,16 @@ Commit.
 
 ---
 
-## Phase 13 — Tier-2 only
+## Phase 13 — Post-Tier-1 enhancements
 
-Only if all Tier 1 works:
+Only after Tier 1 works:
 
-- focused pytest tests
-- Full Name split
-- basic schema editor
-- visual polish
+- focused pytest tests — implemented
+- Full Name split — implemented
+- basic schema editor — deferred
+- visual polish — implemented where it improves supervision
 
-Each Tier-2 addition gets its own verification and commit.
+Each enhancement gets its own verification and commit.
 
 ---
 
@@ -3612,7 +3656,7 @@ Before adding any unrelated feature:
 
 10. **Do not let the AI decide its own escalation policy.**
 
-11. **Do not weaken the 0.85 threshold.**
+11. **Do not weaken the 0.80 threshold.**
 
 12. **Do not auto-resolve structural incompatibility because AI confidence is high.**
 
@@ -3634,7 +3678,7 @@ Before adding any unrelated feature:
 
 21. **Do not spend Tier-1 time implementing anything listed under DO NOT BUILD.**
 
-22. **Do not start Tier 2 until Tier 1 works end-to-end.**
+22. **Do not start optional enhancements until Tier 1 works end-to-end.**
 
 23. **If the implementation spec is genuinely ambiguous, stop and ask the user instead of guessing.**
 
@@ -3667,7 +3711,7 @@ While implementing:
 
 - Keep LLM inference separate from deterministic policy.
 - AI proposes; application policy decides review.
-- The confidence threshold is exactly 0.85.
+- The confidence threshold is exactly 0.80.
 - Structural incompatibility overrides AI confidence.
 - Mapping-level ambiguity may block transformation.
 - Record-level problems must not block unrelated records.
@@ -3730,7 +3774,7 @@ Generate mappings
 ↓
 Show confidence + reason
 ↓
-Apply confidence 0.85 policy
+Apply confidence 0.80 policy
 ↓
 Override bad high-confidence mapping via compatibility policy
 ↓
@@ -3774,10 +3818,4 @@ one-page write-up
 demo recording
 ```
 
-Only after that may Tier 2 or deployment work begin.
-
-This now covers all three issues: lineage is a hard invariant, §2.1 explicitly wins if duplicate sections ever diverge, and Cursor gets a separate operating discipline it should follow phase-by-phase rather than reading the spec once and drifting.
-
-
-The reference ui for Streamlit is in folder - /data/Work/Assignments/DarwinBox/stitch_data_migration_studio_ui
-So: keep the UI as-is for visual reference, but add a note to Cursor that all counts, filenames, row numbers, lineage, statuses, and mapping values shown in Stitch are illustrative and must come from runtime state. The only actual unresolved product decision is the Full Name split.
+The implementation is submission-complete only when the checked-in README, Git history, one-page write-up, and linked demo recording all accompany the verified prototype.

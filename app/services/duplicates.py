@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from app.database import db_session, utcnow
 from app.errors import AppError
-from app.services.audit import HUMAN, append_audit
+from app.services.audit import AGENT, HUMAN, append_audit
 from app.services.migrations import get_migration, require_migration
 from app.status import EXACT_DEDUPED, EXCLUDED, NEEDS_REVIEW, RESOLVED, TRANSFORMED
 
@@ -140,6 +140,21 @@ def analyze_duplicates(migration_id: int) -> dict:
                     "UPDATE normalized_records SET status = 'TRANSFORMED' WHERE id = ?",
                     (keeper["id"],),
                 )
+                keeper_sources = _lineage_for_record(connection, keeper["id"])
+                source_summary = ", ".join(
+                    f"{s['source_file']} row {s['source_row_number']}" for s in keeper_sources
+                )
+                append_audit(
+                    connection,
+                    migration_id,
+                    AGENT,
+                    "exact duplicate deduplicated",
+                    employee_id,
+                    (
+                        f"Collapsed {len(members) - 1} exact duplicate(s); keeper record "
+                        f"{keeper['id']} retains lineage ({source_summary})."
+                    ),
+                )
                 continue
 
             differing = _differing_fields([m["payload"] for m in members])
@@ -180,11 +195,30 @@ def analyze_duplicates(migration_id: int) -> dict:
                     "UPDATE normalized_records SET status = ? WHERE id = ?",
                     (NEEDS_REVIEW, member["id"]),
                 )
+            append_audit(
+                connection,
+                migration_id,
+                AGENT,
+                "duplicate conflict escalated",
+                employee_id,
+                rule,
+            )
             conflicts_created += 1
 
         connection.execute(
             "UPDATE migrations SET status = 'DUPLICATES_ANALYZED' WHERE id = ?",
             (migration_id,),
+        )
+        append_audit(
+            connection,
+            migration_id,
+            AGENT,
+            "duplicate analysis completed",
+            "employees",
+            (
+                f"{exact_groups if auto_remove else 0} exact duplicate group(s) collapsed, "
+                f"{conflicts_created} conflict(s) escalated."
+            ),
         )
 
     return {

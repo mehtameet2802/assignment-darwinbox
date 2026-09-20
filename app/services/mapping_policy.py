@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.services.compatibility import is_structurally_compatible
 from app.status import NEEDS_REVIEW
 
-CONFIDENCE_THRESHOLD = 0.85
+CONFIDENCE_THRESHOLD = 0.8
 
 AUTO_APPROVED = "AUTO_APPROVED"
 IGNORED = "IGNORED"
@@ -14,6 +14,7 @@ RULE_CONFIDENCE = "confidence_below_threshold"
 RULE_STRUCTURAL = "structural_incompatibility"
 RULE_NO_MAPPING = "mapping_not_produced_safely"
 RULE_HUMAN_RESOLVED = "human_resolved"
+RULE_TARGET_FIELD_COLLISION = "TARGET_FIELD_COLLISION"
 
 
 def evaluate_mapping_policy(

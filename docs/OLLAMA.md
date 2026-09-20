@@ -50,6 +50,14 @@ Verify:
 
 ---
 
+## Why the mapping cutoff is 0.80
+
+`0.80` is a product-policy cutoff for this MVP, not a statistically calibrated probability of correctness. I chose it as a practical balance: lower-confidence semantic guesses should stop for review, while clear proposals should not make a consultant confirm every column. Crossing the cutoff only makes a proposal *eligible* for automatic acceptance. Structural compatibility, target-field collision checks and deterministic validation can still force review regardless of model confidence.
+
+This value should be recalibrated against representative client mappings before production use. It is separate from the **75% evaluation pass rate** below: `0.80` applies to one mapping proposal, whereas `75%` decides whether the configured model passes the four-case MVP smoke test.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -64,7 +72,7 @@ Verify:
 
 ## Model evaluation checklist
 
-Run **after Phase 5** (mapping policy + review reasons) on the three demo files. Use results for your 1-page write-up (2–3 concrete auto vs escalated examples).
+Run **after Phase 5** (mapping policy + review reasons) on the four demo files. Use results for your 1-page write-up (2–3 concrete auto vs escalated examples).
 
 ### A. Coverage
 
@@ -76,7 +84,7 @@ For each proposal, mark **correct / wrong / unsure**. Obvious HR headers should 
 
 ### C. Calibration
 
-When you would hesitate, does **confidence &lt; 0.85** so review triggers? High confidence on wrong maps is a signal to tune policy or consider a larger model.
+When you would hesitate, does **confidence &lt; 0.80** so review triggers? High confidence on wrong maps is a signal to tune policy or consider a larger model.
 
 ### D. Stability
 
@@ -100,4 +108,13 @@ Automated golden-column check (before/after model change):
 .venv/bin/python scripts/eval_mapping_samples.py
 ```
 
-Default pass threshold: **≥ 75%** of golden cases (see script output). Below that, investigate before Phase 5 demo lock-in.
+Default pass threshold: **≥ 75%** of golden cases (see script output). With the
+current four-case set, this means at least **3 of 4** cases must pass. The MVP
+allows one miss because semantic mappings are suggestions and low-confidence
+results are sent for human review. Two or more misses would mean the configured
+model or prompt is not dependable enough for the demo, so investigate before
+Phase 5 lock-in.
+
+This threshold is a pragmatic MVP smoke-test gate, not a production accuracy
+target or service-level guarantee. Reassess it against a larger, representative
+golden set before production use.

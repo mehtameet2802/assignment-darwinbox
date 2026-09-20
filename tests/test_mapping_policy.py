@@ -42,7 +42,7 @@ def test_spec_example_b_low_confidence() -> None:
     )
     assert result["status"] == NEEDS_REVIEW
     assert result["review_rule_fired"] == RULE_CONFIDENCE
-    assert str(CONFIDENCE_THRESHOLD) in result["review_reason"] or "0.85" in result["review_reason"]
+    assert f"{CONFIDENCE_THRESHOLD:.2f}" in result["review_reason"]
 
 
 def test_spec_example_c_structural_overrides_high_confidence() -> None:
@@ -83,7 +83,20 @@ def test_generate_mappings_persists_policy_and_human_override(client) -> None:
         "success": True,
     }
 
-    with patch("app.services.llm_client.LLMClient.infer_mapping", return_value=mock_semantic):
+    def _semantic_for_date_only(column: str, _source_type: str, _samples: list[str]) -> dict:
+        if column == "Date":
+            return mock_semantic
+        return {
+            "source_column": column,
+            "success": False,
+            "target_field": None,
+            "confidence": None,
+            "reason": "not mocked",
+            "alternatives": [],
+            "method": "ollama",
+        }
+
+    with patch("app.services.llm_client.LLMClient.infer_mapping", side_effect=_semantic_for_date_only):
         response = client.post(
             f"/api/migrations/{migration_id}/mappings/generate?include_semantic=true"
         )
