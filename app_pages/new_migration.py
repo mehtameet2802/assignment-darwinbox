@@ -4,8 +4,12 @@ import pandas as pd
 import streamlit as st
 
 from ui.api import api_delete, api_get, api_patch, api_post, show_api_error
-from ui.migration import current_migration
-from ui.migration_picker import sync_migration_selectbox
+from ui.migration import (
+    clear_pipeline_migration_if_completed,
+    current_migration,
+    list_pipeline_migrations,
+)
+from ui.migration_picker import render_bound_migration_selectbox, reset_migration_picker_widgets
 from ui.navigation import PAGE_MAPPINGS, render_pipeline_stepper, switch_to
 from ui.schema import render_schema_card
 
@@ -19,26 +23,31 @@ render_pipeline_stepper(0)
 st.caption("Stage source files, then continue to map columns.")
 render_schema_card()
 
+clear_pipeline_migration_if_completed()
+
 col_new, col_existing = st.columns([1, 2])
 with col_new:
     if st.button("Create migration", type="primary"):
         response = api_post("/api/migrations", json={"name": "Employee Migration"})
         if response.status_code == 201:
             st.session_state.migration_id = response.json()["id"]
+            reset_migration_picker_widgets()
             st.rerun()
         else:
             show_api_error(response, "Could not create migration.")
 with col_existing:
-    listing = api_get("/api/migrations").json().get("migrations", [])
+    listing = list_pipeline_migrations()
     labels = {
         f"MIG-{item['id']} • {item['name']} ({item['file_count']} files)": item["id"]
         for item in listing
     }
     option_labels = ["(none)"] + list(labels.keys())
-    sync_migration_selectbox("new_migration_active_pick", option_labels, labels)
-    selected = st.selectbox("Active migration", option_labels, key="new_migration_active_pick")
-    if selected != "(none)":
-        st.session_state.migration_id = labels[selected]
+    render_bound_migration_selectbox(
+        label="Active migration",
+        session_key="new_migration_active_pick",
+        option_labels=option_labels,
+        label_to_id=labels,
+    )
 
 migration = current_migration()
 if migration is None:
@@ -69,7 +78,16 @@ st.caption("Each upload adds files to this migration without removing files alre
 if st.button("Load demo files into this migration"):
     response = api_post(f"/api/migrations/{migration['id']}/demo-files")
     if response.status_code == 201:
+        payload = response.json()
+        ingested = payload.get("ingested") or []
         _clear_mapping_cache(migration["id"])
+        if ingested:
+            st.toast(
+                f"Staged {len(ingested)} demo file(s) on MIG-{migration['id']}.",
+                icon="✅",
+            )
+        else:
+            st.toast("Demo files were already staged on this migration.", icon="ℹ️")
         st.rerun()
     else:
         show_api_error(response, "Could not load demo files.")
@@ -86,7 +104,14 @@ if uploaded and st.button("Add uploaded files to this migration"):
     ]
     response = api_post(f"/api/migrations/{migration['id']}/files", files=files)
     if response.status_code == 201:
+        payload = response.json()
+        n_files = payload.get("file_count", len(uploaded))
         _clear_mapping_cache(migration["id"])
+        st.toast(
+            f"Added {len(uploaded)} file(s) to MIG-{migration['id']} "
+            f"({n_files} staged total).",
+            icon="✅",
+        )
         st.rerun()
     else:
         show_api_error(response, "Upload failed.")

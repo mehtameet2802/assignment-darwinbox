@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.services.compatibility import is_structurally_compatible
 from app.status import NEEDS_REVIEW
 
-CONFIDENCE_THRESHOLD = 0.85
+CONFIDENCE_THRESHOLD = 0.8
 
 AUTO_APPROVED = "AUTO_APPROVED"
 IGNORED = "IGNORED"

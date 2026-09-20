@@ -96,6 +96,14 @@ def _mock_suggest(source_column: str, source_file: str, sample_values: list[str]
             "success": True,
             "method": "ollama_mock",
         }
+    if source_file.endswith("employees_ambiguous_dates.csv") and source_column == "Date":
+        return {
+            "suggested_format": FORMAT_DMY,
+            "confidence": 0.58,
+            "reason": "Mock: all slash samples are dual-parse; suggestion only — human must confirm.",
+            "success": True,
+            "method": "ollama_mock",
+        }
     return {
         "suggested_format": None,
         "confidence": None,

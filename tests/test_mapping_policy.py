@@ -42,7 +42,7 @@ def test_spec_example_b_low_confidence() -> None:
     )
     assert result["status"] == NEEDS_REVIEW
     assert result["review_rule_fired"] == RULE_CONFIDENCE
-    assert str(CONFIDENCE_THRESHOLD) in result["review_reason"] or "0.85" in result["review_reason"]
+    assert f"{CONFIDENCE_THRESHOLD:.2f}" in result["review_reason"]
 
 
 def test_spec_example_c_structural_overrides_high_confidence() -> None:

@@ -11,9 +11,9 @@ AUDIT_PAGE_SIZE = 25
 render_pipeline_stepper(4)
 
 st.caption(
-    "Immutable history for **any** migration — in progress, finished push, or not yet pushed. "
-    "Closing the push workflow (so it leaves the Push page) is separate: that only happens when you click "
-    "**Complete migration** on Push to target."
+    "Immutable history for **every** migration (in progress or **finished**). "
+    "Finished migrations appear here with a **finished** tag; they are hidden from pipeline "
+    "**Active migration** dropdowns on earlier steps."
 )
 
 migration = require_migration("Select a migration to view its audit log.")

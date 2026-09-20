@@ -149,6 +149,7 @@ def load_demo_files(migration_id: int) -> dict:
         DEMO_DIR / "employees_legacy.csv",
         DEMO_DIR / "employee_master.xlsx",
         DEMO_DIR / "employees_extra.csv",
+        DEMO_DIR / "employees_ambiguous_dates.csv",
     ]
     missing = [str(path.name) for path in demo_files if not path.exists()]
     if missing:

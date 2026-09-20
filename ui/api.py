@@ -8,26 +8,50 @@ from app.config import BACKEND_URL
 
 @st.cache_resource
 def _session() -> requests.Session:
-    return requests.Session()
+    session = requests.Session()
+    # Avoid reusing dead sockets after Flask restarts (common with FLASK_DEBUG).
+    session.headers["Connection"] = "close"
+    return session
+
+
+def _reset_session() -> None:
+    _session.clear()
+
+
+def _request(method: str, path: str, *, timeout: int, **kwargs) -> requests.Response:
+    url = f"{BACKEND_URL}{path}"
+    last_error: requests.RequestException | None = None
+    for attempt in range(2):
+        try:
+            return _session().request(method, url, timeout=timeout, **kwargs)
+        except requests.ConnectionError as exc:
+            last_error = exc
+            _reset_session()
+            if attempt == 0:
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("unreachable")
 
 
 def api_get(path: str, timeout: int = 10, **kwargs) -> requests.Response:
-    return _session().get(f"{BACKEND_URL}{path}", timeout=timeout, **kwargs)
+    return _request("GET", path, timeout=timeout, **kwargs)
 
 
 def api_post(path: str, **kwargs) -> requests.Response:
     timeout = kwargs.pop("timeout", 30)
-    return _session().post(f"{BACKEND_URL}{path}", timeout=timeout, **kwargs)
+    return _request("POST", path, timeout=timeout, **kwargs)
 
 
 def api_patch(path: str, **kwargs) -> requests.Response:
     timeout = kwargs.pop("timeout", 10)
-    return _session().patch(f"{BACKEND_URL}{path}", timeout=timeout, **kwargs)
+    return _request("PATCH", path, timeout=timeout, **kwargs)
 
 
 def api_delete(path: str, **kwargs) -> requests.Response:
     timeout = kwargs.pop("timeout", 10)
-    return _session().delete(f"{BACKEND_URL}{path}", timeout=timeout, **kwargs)
+    return _request("DELETE", path, timeout=timeout, **kwargs)
 
 
 def fetch_backend_health() -> tuple[bool, dict]:

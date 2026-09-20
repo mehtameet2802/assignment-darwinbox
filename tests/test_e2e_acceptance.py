@@ -39,8 +39,9 @@ def test_take_home_acceptance_pipeline(client) -> None:
         "employees_legacy.csv",
         "employee_master.xlsx",
         "employees_extra.csv",
+        "employees_ambiguous_dates.csv",
     }
-    assert ingest_body["total_source_rows"] == 13
+    assert ingest_body["total_source_rows"] == 16
 
     # 2. Autonomous mapping (aliases + mocked semantic for ambiguous columns)
     with patch("app.services.llm_client.LLMClient.infer_mapping", side_effect=_ollama_side_effect):
@@ -71,6 +72,19 @@ def test_take_home_acceptance_pipeline(client) -> None:
     else:
         assert extra_date["status"] in {"RESOLVED", "AUTO_RESOLVED"}
         assert extra_date.get("chosen_format")
+
+    ambiguous_date = next(
+        e
+        for e in date_body["escalations"]
+        if e["source_file"] == "employees_ambiguous_dates.csv" and e["source_column"] == "Date"
+    )
+    assert ambiguous_date["status"] == "NEEDS_REVIEW"
+    assert ambiguous_date["issue_type"] == "DATE_FORMAT_AMBIGUITY"
+    assert ambiguous_date["chosen_format"] is None
+    client.patch(
+        f"/api/migrations/{migration_id}/date-escalations/{ambiguous_date['id']}",
+        json={"chosen_format": "DD/MM/YYYY"},
+    )
 
     assert client.post(f"/api/migrations/{migration_id}/transform").status_code == 201
     assert client.post(f"/api/migrations/{migration_id}/duplicates/analyze").status_code == 201

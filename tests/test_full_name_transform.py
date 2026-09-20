@@ -30,6 +30,9 @@ def test_transform_splits_employee_name_into_first_and_last(client) -> None:
     with patch("app.services.llm_client.LLMClient.infer_mapping", side_effect=_ollama_side_effect):
         client.post(f"/api/migrations/{migration_id}/mappings/generate?include_semantic=true")
     client.post(f"/api/migrations/{migration_id}/date-columns/scan")
+    from tests.test_duplicates import _resolve_blocking_date_escalations
+
+    _resolve_blocking_date_escalations(client, migration_id)
     client.post(f"/api/migrations/{migration_id}/transform")
 
     with db_session() as connection:

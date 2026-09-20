@@ -219,6 +219,16 @@ def _push_records(
         )
 
     summary = _summarize_results(results)
+    with db_session() as connection:
+        post_counts = _record_status_counts(connection, migration_id)
+        failed_rows = connection.execute(
+            """
+            SELECT employee_id FROM normalized_records
+            WHERE migration_id = ? AND status = ?
+            ORDER BY employee_id
+            """,
+            (migration_id, PUSH_FAILED),
+        ).fetchall()
     return {
         "migration_id": migration_id,
         "push_batch_id": batch_id,
@@ -229,6 +239,13 @@ def _push_records(
         "records_attempted": len(results),
         "summary": summary,
         "results": results,
+        "post_operation_state": {
+            "ready_to_push": post_counts[READY_TO_PUSH],
+            "pushed": post_counts[PUSHED],
+            "push_failed": post_counts[PUSH_FAILED],
+            "target_records": len(list_target_records_for_migration(migration_id)),
+        },
+        "migration_failed_employee_ids": [row["employee_id"] for row in failed_rows],
     }
 
 
@@ -266,6 +283,15 @@ def rollback_latest_push(migration_id: int) -> dict:
             (batch["id"],),
         ).fetchall()
         employee_ids = [row["employee_id"] for row in success_rows]
+        unchanged_failed_rows = connection.execute(
+            """
+            SELECT employee_id FROM normalized_records
+            WHERE migration_id = ? AND status = ?
+            ORDER BY employee_id
+            """,
+            (migration_id, PUSH_FAILED),
+        ).fetchall()
+        unchanged_failed_ids = [row["employee_id"] for row in unchanged_failed_rows]
 
         rollback_cursor = connection.execute(
             """
@@ -325,25 +351,58 @@ def rollback_latest_push(migration_id: int) -> dict:
             "UPDATE migrations SET completed_at = NULL WHERE id = ?",
             (migration_id,),
         )
+        removed_count = int(deleted["deleted_count"])
+        returned_count = len(employee_ids)
+        audit_reason = (
+            f"Rolled back push batch {batch_key}: removed {removed_count} target record(s) "
+            f"and returned them to READY_TO_PUSH."
+        )
+        if unchanged_failed_ids:
+            audit_reason += (
+                f" {len(unchanged_failed_ids)} previously failed record(s), "
+                f"{', '.join(unchanged_failed_ids)}, unchanged because they never existed in the target."
+            )
         append_audit(
             connection,
             migration_id,
             SYSTEM,
             "rollback completed",
             batch_key,
-            f"Removed {deleted['deleted_count']} target records",
+            audit_reason,
         )
+        post_counts = _record_status_counts(connection, migration_id)
+        target_row = connection.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM mock_target_records mtr
+            INNER JOIN push_batches pb ON pb.id = CAST(mtr.batch_id AS INTEGER)
+            WHERE pb.migration_id = ?
+            """,
+            (migration_id,),
+        ).fetchone()
+        target_count_after = int(target_row["n"] if target_row else 0)
 
     summary = _summarize_results(rollback_results)
+    post_operation_state = {
+        "ready_to_push": post_counts[READY_TO_PUSH],
+        "pushed": post_counts[PUSHED],
+        "push_failed": post_counts[PUSH_FAILED],
+        "target_records": target_count_after,
+    }
     return {
         "migration_id": migration_id,
         "push_batch_id": rollback_batch_id,
         "rolled_back_push_batch_id": batch["id"],
         "operation": OPERATION_ROLLBACK,
         "operation_label": "Rollback completed",
-        "deleted_target_records": deleted["deleted_count"],
+        "removed_from_target": removed_count,
+        "returned_to_ready": returned_count,
+        "unchanged_failed": len(unchanged_failed_ids),
+        "unchanged_failed_employee_ids": unchanged_failed_ids,
+        "post_operation_state": post_operation_state,
+        "deleted_target_records": removed_count,
         "employee_ids_removed": sorted(set(employee_ids)),
-        "records_returned_to_ready": len(employee_ids),
+        "records_returned_to_ready": returned_count,
         "summary": summary,
         "results": rollback_results,
     }
@@ -452,7 +511,21 @@ def _workflow_state(
         }
 
     if failed > 0:
-        if pushed == 0 and target_count == 0:
+        if ready > 0:
+            return {
+                "phase": "ready_and_failed",
+                "title": "Rolled-back records are ready; earlier failures remain",
+                "summary": (
+                    f"**{ready}** record(s) are ready to push again. "
+                    f"**{failed}** record(s) remain failed because they never reached the target."
+                ),
+                "next_step": (
+                    "Push the ready records and retry the failed records. "
+                    "Both groups must be cleared before completing the migration."
+                ),
+                "can_complete": False,
+            }
+        if ready == 0 and pushed == 0 and target_count == 0:
             return {
                 "phase": "all_failed",
                 "title": "Every record failed — nothing in the target",
@@ -616,10 +689,39 @@ def get_push_overview(migration_id: int) -> dict:
         has_push_activity=int(batch_count) > 0,
     )
 
+    failed_ids = [item["employee_id"] for item in failed_records]
+    migration_state = {
+        "ready_to_push": record_counts["ready_to_push"],
+        "pushed": record_counts["pushed"],
+        "push_failed": record_counts["push_failed"],
+        "target_records": len(target_records),
+        "failed_employee_ids": failed_ids,
+    }
+    if failed_ids and record_counts["pushed"] > 0:
+        migration_state["summary"] = (
+            f"{record_counts['pushed']} pushed, {record_counts['push_failed']} failed from earlier attempt(s). "
+            f"{', '.join(failed_ids)} still require retry."
+        )
+    elif failed_ids:
+        migration_state["summary"] = (
+            f"{record_counts['push_failed']} failed. {', '.join(failed_ids)} require retry."
+        )
+    elif record_counts["pushed"] > 0 and record_counts["ready_to_push"] == 0:
+        migration_state["summary"] = (
+            f"{record_counts['pushed']} pushed, {record_counts['push_failed']} failed, "
+            f"{len(target_records)} in target."
+        )
+    else:
+        migration_state["summary"] = (
+            f"{record_counts['ready_to_push']} ready, {record_counts['pushed']} pushed, "
+            f"{record_counts['push_failed']} failed."
+        )
+
     return {
         "migration_id": migration_id,
         "completed_at": completed_at,
         "record_counts": record_counts,
+        "migration_state": migration_state,
         "workflow": workflow,
         "latest_operation": latest,
         "failed_records": failed_records,

@@ -46,6 +46,7 @@ def test_demo_files_ingest_row_counts_columns_and_lineage(client) -> None:
         "employees_legacy.csv",
         "employee_master.xlsx",
         "employees_extra.csv",
+        "employees_ambiguous_dates.csv",
     }
     assert files["employees_legacy.csv"]["row_count"] == 4
     assert files["employees_legacy.csv"]["column_count"] == 6
@@ -67,7 +68,8 @@ def test_demo_files_ingest_row_counts_columns_and_lineage(client) -> None:
         "Office",
     ]
     assert files["employees_extra.csv"]["row_count"] == 5
-    assert payload["total_source_rows"] == 13
+    assert files["employees_ambiguous_dates.csv"]["row_count"] == 3
+    assert payload["total_source_rows"] == 16
 
     legacy_preview = client.get(
         f"/api/migrations/{migration_id}/files/{files['employees_legacy.csv']['id']}/preview"
@@ -109,4 +111,5 @@ def test_demo_files_exist_on_disk() -> None:
     assert (DEMO_DIR / "employees_legacy.csv").exists()
     assert (DEMO_DIR / "employee_master.xlsx").exists()
     assert (DEMO_DIR / "employees_extra.csv").exists()
+    assert (DEMO_DIR / "employees_ambiguous_dates.csv").exists()
     assert PROJECT_ROOT.joinpath("data", "demo").exists()
